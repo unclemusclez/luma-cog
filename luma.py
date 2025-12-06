@@ -8,8 +8,8 @@ from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
 
-from .models.calendar_get import Event
-from .models.data_models import Subscription, ChannelGroup
+from .calendar_get import Event
+from .data_models import Subscription, ChannelGroup
 from .api_client import (
     LumaAPIClient,
     LumaAPIError,
