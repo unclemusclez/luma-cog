@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
 
-from calendar_get import Event, Model
+from .calendar_get import Event, Model
 
 log = logging.getLogger("red.luma.api")
 
