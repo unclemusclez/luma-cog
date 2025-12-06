@@ -2,14 +2,11 @@ import asyncio
 import aiohttp
 import logging
 import time
-import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
 
-
-sys.path.append("./")
-from .calendar_get import Event, Model
+from luma_cog.models.calendar_get import Event, Model
 
 log = logging.getLogger("red.luma.api")
 

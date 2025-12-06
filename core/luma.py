@@ -9,15 +9,17 @@ from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
 
-sys.path.append("./")
-from .calendar_get import Event
-from .data_models import Subscription, ChannelGroup
-from .api_client import (
+from luma_cog.models.calendar_get import Event
+from luma_cog.models.data_models import Subscription, ChannelGroup
+from luma_cog.core.api_client import (
     LumaAPIClient,
     LumaAPIError,
     LumaAPIRateLimitError,
     LumaAPINotFoundError,
 )
+
+sys.path.append("./")
+
 
 log = logging.getLogger("red.luma")
 
