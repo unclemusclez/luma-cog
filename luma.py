@@ -6,7 +6,7 @@ import discord
 from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
-from datetime import timedelta``
+from datetime import timedelta
 from typing import Dict, List
 from calendar_get import Event
 
