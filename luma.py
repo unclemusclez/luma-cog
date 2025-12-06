@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import logging
 from datetime import datetime
@@ -8,6 +9,7 @@ from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
 
+sys.path.append("./")
 from .calendar_get import Event
 from .data_models import Subscription, ChannelGroup
 from .api_client import (
