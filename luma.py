@@ -1,14 +1,15 @@
+import asyncio
+import logging
+from datetime import datetime
+
 import discord
 from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
-from redbot.core.utils import menus
-import asyncio
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
-from models.calendar_get import Event, Model
+from redbot.core.utils import menus, timedelta
+from typing import Dict, List
+from .calendar_get import Event
 
-from models.data_models import Subscription, ChannelGroup, LumaConfig
+from .data_models import Subscription, ChannelGroup
 from .api_client import (
     LumaAPIClient,
     LumaAPIError,
