@@ -1,0 +1,26 @@
+{
+    "author": ["Devin J. Dawson"],
+    "description": "Luma Events Cog for Red-DiscordBot - A comprehensive cog for managing Luma calendar subscriptions and displaying events across Discord channels. This cog provides seamless integration with Luma's calendar API to keep your Discord community informed about upcoming events with customizable channel groups and automatic updates.",
+    "end_user_data_statement": "This cog stores Luma API credentials and calendar subscription information in Red's Config system. No personal user data is collected or stored. All data is associated with Discord server IDs and can be deleted using the `[p]luma reset` command or by removing the cog from the server.",
+    "install_msg": "Thanks for installing the Luma Events cog! Use `[p]luma help` to get started with setting up your calendar subscriptions.",
+    "short": "Luma calendar integration for Discord - manage and display events from Luma calendars",
+    "min_bot_version": "3.5.0",
+    "max_bot_version": "3.6.0",
+    "min_python_version": [3, 8, 0],
+    "hidden": false,
+    "disabled": false,
+    "required_cogs": {},
+    "requirements": [
+        "aiohttp>=3.8.0",
+        "pydantic>=1.10.0"
+    ],
+    "tags": [
+        "calendar",
+        "events",
+        "luma",
+        "productivity",
+        "scheduling",
+        "automation"
+    ],
+    "type": "COG"
+}
