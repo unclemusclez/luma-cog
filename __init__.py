@@ -1,7 +1,4 @@
-from luma.luma import Luma
-import luma.api_client
-import luma.models.calendar_get
-import luma.models.data_models
+from .luma import Luma
 
 def setup(bot):
     bot.add_cog(Luma(bot))
