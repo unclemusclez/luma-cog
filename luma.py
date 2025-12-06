@@ -8,10 +8,10 @@ from redbot.core.bot import Red
 from redbot.core.utils import menus
 from datetime import timedelta
 from typing import Dict, List
-from luma.models.calendar_get import Event
+from .models.calendar_get import Event
 
-from luma.models.data_models import Subscription, ChannelGroup
-from luma.api_client import (
+from .models.data_models import Subscription, ChannelGroup
+from .api_client import (
     LumaAPIClient,
     LumaAPIError,
     LumaAPIRateLimitError,
