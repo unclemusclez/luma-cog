@@ -6,12 +6,11 @@ import discord
 from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
-from . import models, api_client
 from datetime import timedelta
 from typing import Dict, List
-from models.calendar_get import Event
+from calendar_get import Event
 
-from models.data_models import Subscription, ChannelGroup
+from data_models import Subscription, ChannelGroup
 from api_client import (
     LumaAPIClient,
     LumaAPIError,
