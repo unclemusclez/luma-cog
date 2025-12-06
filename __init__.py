@@ -1,4 +1,4 @@
-from .luma import Luma
+from luma import Luma
 
 
 def setup(bot):
