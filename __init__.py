@@ -1,6 +1,6 @@
-import api_client
-import calander_get
-import luma
+import .api_client
+import .calander_get
+import .luma
 
 
 def setup(bot):
