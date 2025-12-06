@@ -31,11 +31,14 @@ This cog stores the following data for each Discord server (guild) that uses it:
    - Timestamps of when subscriptions were added
 
 2. Data is stored using Red's Config system with the following keys:
+   Global settings:
+   - update_interval_hours: Integer for update frequency (global for all guilds)
+   - last_update: ISO timestamp of last update
+   
+   Per-guild settings:
    - subscriptions: Dict of API ID -> subscription details
    - channel_groups: Dict of group name -> channel group configuration
-   - update_interval_hours: Integer for update frequency
-   - enabled: Boolean for automatic updates
-   - last_update: ISO timestamp of last update
+   - enabled: Boolean for automatic updates (per guild)
 
 3. No personal user data is collected or stored
 4. All data is associated with Discord server IDs
@@ -74,12 +77,13 @@ class Luma(commands.Cog):
             self, identifier=928374927364, force_registration=True
         )
 
-        # Default configuration
+        # Default configuration - global settings
+        self.config.register_global(update_interval_hours=24, last_update=None)
+
+        # Default guild configuration
         default_guild = {
             "subscriptions": {},
             "channel_groups": {},
-            "update_interval_hours": 24,
-            "last_update": None,
             "enabled": True,
         }
 
@@ -93,12 +97,11 @@ class Luma(commands.Cog):
         """Initialize the cog and start background tasks.
 
         This method is called when the cog is loaded. It waits for the bot
-        to be ready and then starts the background update task if updates
-        are enabled for the global config.
+        to be ready and then starts the background update task.
+        For multi-guild support, each guild manages its own enabled status.
         """
         await self.bot.wait_until_ready()
-        if await self.config.enabled():
-            await self.start_update_task()
+        await self.start_update_task()
 
     def cog_unload(self):
         """Clean up when cog is unloaded."""
@@ -127,7 +130,11 @@ class Luma(commands.Cog):
         """Update events for all guilds and their subscriptions."""
         for guild in self.bot.guilds:
             try:
-                await self.update_guild_events(guild)
+                # Check if this guild has enabled updates
+                if await self.config.guild(guild).enabled():
+                    await self.update_guild_events(guild)
+                else:
+                    log.debug(f"Updates disabled for guild {guild.id}, skipping")
             except Exception as e:
                 log.error(f"Error updating events for guild {guild.id}: {e}")
 
@@ -525,21 +532,26 @@ class Luma(commands.Cog):
     async def config_group(self, ctx: commands.Context):
         """Configure Luma plugin settings."""
         if ctx.invoked_subcommand is None:
-            config = await self.config.guild(ctx.guild).all()
+            guild_config = await self.config.guild(ctx.guild).all()
+            global_config = await self.config.all()
 
             embed = discord.Embed(
                 title="Luma Configuration", color=discord.Color.blue()
             )
             embed.add_field(
                 name="Update Interval",
-                value=f"{config['update_interval_hours']} hours",
+                value=f"{global_config['update_interval_hours']} hours (global)",
                 inline=True,
             )
             embed.add_field(
-                name="Enabled", value="Yes" if config["enabled"] else "No", inline=True
+                name="Enabled",
+                value="Yes" if guild_config["enabled"] else "No",
+                inline=True,
             )
             embed.add_field(
-                name="Last Update", value=config["last_update"] or "Never", inline=True
+                name="Last Update",
+                value=global_config["last_update"] or "Never",
+                inline=True,
             )
 
             await ctx.send(embed=embed)
@@ -552,11 +564,10 @@ class Luma(commands.Cog):
             await ctx.send("Update interval must be between 1 and 168 hours.")
             return
 
-        await self.config.guild(ctx.guild).update_interval_hours.set(hours)
+        await self.config.update_interval_hours.set(hours)
 
         # Restart the update task with new interval
-        if await self.config.enabled():
-            await self.start_update_task()
+        await self.start_update_task()
 
         embed = discord.Embed(
             title="Update Interval Updated",
@@ -568,13 +579,12 @@ class Luma(commands.Cog):
     @config_group.command(name="enable")
     @checks.admin_or_permissions(manage_guild=True)
     async def enable_updates(self, ctx: commands.Context):
-        """Enable automatic event updates."""
+        """Enable automatic event updates for this guild."""
         await self.config.guild(ctx.guild).enabled.set(True)
-        await self.start_update_task()
 
         embed = discord.Embed(
             title="Updates Enabled",
-            description="Automatic event updates are now enabled.",
+            description="Automatic event updates are now enabled for this guild.",
             color=discord.Color.green(),
         )
         await ctx.send(embed=embed)
@@ -582,15 +592,12 @@ class Luma(commands.Cog):
     @config_group.command(name="disable")
     @checks.admin_or_permissions(manage_guild=True)
     async def disable_updates(self, ctx: commands.Context):
-        """Disable automatic event updates."""
+        """Disable automatic event updates for this guild."""
         await self.config.guild(ctx.guild).enabled.set(False)
-        if self.update_task:
-            self.update_task.cancel()
-            self.update_task = None
 
         embed = discord.Embed(
             title="Updates Disabled",
-            description="Automatic event updates are now disabled.",
+            description="Automatic event updates are now disabled for this guild.",
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
