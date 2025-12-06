@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set
 from models.calendar_get import Event, Model
 
-from .data_models import Subscription, ChannelGroup, LumaConfig
+from models.data_models import Subscription, ChannelGroup, LumaConfig
 from .api_client import (
     LumaAPIClient,
     LumaAPIError,

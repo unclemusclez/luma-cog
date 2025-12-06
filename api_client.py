@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
-import json
 
 from models.calendar_get import Event, Model
 
