@@ -18,36 +18,36 @@ class Calendar(BaseModel):
     access_level: str
     api_id: str
     avatar_url: str
-    coordinate: Coordinate
+    coordinate: Optional[Coordinate] = None
     cover_image_url: str
     description_short: str
     event_submission_restriction: str
     geo_city: str
     geo_country: str
     geo_region: str
-    google_measurement_id: None
-    instagram_handle: None
+    google_measurement_id: Optional[Any] = None
+    instagram_handle: Optional[str] = None
     is_blocked: bool
     launch_status: str
-    linkedin_handle: str
+    linkedin_handle: Optional[str] = None
     luma_plus_active: bool
-    meta_pixel_id: None
+    meta_pixel_id: Optional[Any] = None
     name: str
-    personal_user_api_id: None
-    refund_policy: None
+    personal_user_api_id: Optional[str] = None
+    refund_policy: Optional[RefundPolicy] = None
     show_subscriber_count: bool
     slug: str
     social_image_url: str
-    stripe_account_id: str
-    tax_config: None
-    tiktok_handle: None
+    stripe_account_id: Optional[str] = None
+    tax_config: Optional[Any] = None
+    tiktok_handle: Optional[str] = None
     timezone: str
     tint_color: str
     track_meta_ads_from_luma: bool
-    twitter_handle: str
-    verified_at: str
-    website: str
-    youtube_handle: None
+    twitter_handle: Optional[str] = None
+    verified_at: Optional[str] = None
+    website: Optional[str] = None
+    youtube_handle: Optional[str] = None
     is_personal: bool
 
 
@@ -56,8 +56,8 @@ class VirtualInfo(BaseModel):
 
 
 class GeoAddressInfo(BaseModel):
-    mode: str
-    city_state: str
+    mode: Optional[str] = None
+    city_state: Optional[str] = None
     sublocality: Optional[str] = None
     city: Optional[str] = None
     type: Optional[str] = None
@@ -86,7 +86,7 @@ class Event(BaseModel):
     location_type: str
     name: str
     one_to_one: bool
-    recurrence_id: None
+    recurrence_id: Optional[Any] = None
     show_guest_list: bool
     start_at: str
     timezone: str
@@ -95,13 +95,13 @@ class Event(BaseModel):
     visibility: str
     waitlist_enabled: bool
     virtual_info: VirtualInfo
-    geo_address_info: GeoAddressInfo
+    geo_address_info: Optional[GeoAddressInfo] = None
     geo_address_visibility: str
-    coordinate: Coordinate1
+    coordinate: Optional[Coordinate1] = None
 
 
 class CoverImage(BaseModel):
-    vibrant_color: None
+    vibrant_color: Optional[Any] = None
     colors: List[str]
 
 
@@ -120,55 +120,55 @@ class Mark(BaseModel):
 
 
 class ContentItem1(BaseModel):
-    text: str
-    type: str
+    text: Optional[str] = None
+    type: Optional[str] = None
     marks: Optional[List[Mark]] = None
 
 
 class ContentItem(BaseModel):
-    type: str
-    content: List[ContentItem1]
+    type: Optional[str] = None
+    content: Optional[List[ContentItem1]] = None
 
 
 class RefundPolicy(BaseModel):
     type: str
-    content: List[ContentItem]
+    content: Optional[List[ContentItem]] = None
 
 
 class Calendar1(BaseModel):
     access_level: str
     api_id: str
-    avatar_url: str
-    coordinate: Optional[Coordinate2]
-    cover_image_url: str
-    description_short: Optional[str]
+    avatar_url: Optional[str] = None
+    coordinate: Optional[Coordinate2] = None
+    cover_image_url: Optional[str] = None
+    description_short: Optional[str] = None
     event_submission_restriction: str
-    geo_city: Optional[str]
-    geo_country: Optional[str]
-    geo_region: Optional[str]
-    google_measurement_id: None
-    instagram_handle: Optional[str]
+    geo_city: Optional[str] = None
+    geo_country: Optional[str] = None
+    geo_region: Optional[str] = None
+    google_measurement_id: Optional[Any] = None
+    instagram_handle: Optional[str] = None
     is_blocked: bool
     launch_status: str
-    linkedin_handle: Optional[str]
+    linkedin_handle: Optional[str] = None
     luma_plus_active: bool
-    meta_pixel_id: None
+    meta_pixel_id: Optional[Any] = None
     name: str
-    personal_user_api_id: Optional[str]
-    refund_policy: Optional[RefundPolicy]
+    personal_user_api_id: Optional[str] = None
+    refund_policy: Optional[RefundPolicy] = None
     show_subscriber_count: bool
-    slug: Optional[str]
-    social_image_url: Optional[str]
-    stripe_account_id: Optional[str]
-    tax_config: None
-    tiktok_handle: Optional[str]
-    timezone: Optional[str]
+    slug: Optional[str] = None
+    social_image_url: Optional[str] = None
+    stripe_account_id: Optional[str] = None
+    tax_config: Optional[Any] = None
+    tiktok_handle: Optional[str] = None
+    timezone: Optional[str] = None
     tint_color: str
     track_meta_ads_from_luma: bool
-    twitter_handle: Optional[str]
-    verified_at: Optional[str]
-    website: Optional[str]
-    youtube_handle: Optional[str]
+    twitter_handle: Optional[str] = None
+    verified_at: Optional[str] = None
+    website: Optional[str] = None
+    youtube_handle: Optional[str] = None
     is_personal: bool
 
 
@@ -245,7 +245,7 @@ class FeaturedItem(BaseModel):
     ticket_count: int
     ticket_info: TicketInfo
     featured_guests: List[FeaturedGuest]
-    role: None
+    role: Optional[Any] = None
     waitlist_active: bool
     calendar_api_id: str
     is_manager: bool
@@ -300,12 +300,12 @@ class Model(BaseModel):
     has_upcoming_events: bool
     has_access: bool
     is_admin: bool
-    calendar_member: None
+    calendar_member: Optional[Any] = None
     is_subscriber: bool
     tags: List[Tag1]
     event_start_ats: List[str]
     membership_tiers: List[MembershipTier]
-    subscriber_count: None
+    subscriber_count: Optional[Any] = None
     categories: List[Any]
-    membership_info: None
+    membership_info: Optional[Any] = None
     can_subscribe: bool

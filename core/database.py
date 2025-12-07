@@ -17,10 +17,73 @@ class EventDatabase:
     - event_history: Track when events were sent to Discord
     """
 
-    def __init__(self, db_path: str = "luma_events.db"):
-        self.db_path = db_path
+    def __init__(self, cog_instance=None, db_path: Optional[str] = None):
+        """
+        Initialize the event database.
+
+        Args:
+            cog_instance: The cog instance to get the data directory from
+            db_path: Optional custom database path. If None, uses default location.
+        """
+        if db_path:
+            self.db_path = db_path
+        elif cog_instance:
+            # Try to use RedBot's data directory if available
+            try:
+                from redbot.core import Config
+
+                # Use the cog's data directory through Config
+                data_dir = (
+                    Path(Config.get_conf(cog_instance).get_base_config().data_dir)
+                    / "luma"
+                )
+                data_dir.mkdir(parents=True, exist_ok=True)
+                self.db_path = str(data_dir / "luma_events.db")
+            except (ImportError, AttributeError, Exception):
+                # Fallback to a safe default location
+                self._setup_fallback_database_path()
+        else:
+            # Fallback to a safe default location
+            self._setup_fallback_database_path()
+
         self._lock = asyncio.Lock()
         self._initialize_database()
+
+    def _setup_fallback_database_path(self):
+        """Set up a fallback database path that should work in most environments."""
+        try:
+            # Try to use the user's home directory
+            from pathlib import Path
+            import os
+
+            # Try to create a luma directory in a writable location
+            possible_paths = [
+                Path.cwd() / "data" / "luma_events.db",
+                Path.home() / ".luma" / "luma_events.db",
+                Path("/tmp") / "luma_events.db",
+            ]
+
+            for path in possible_paths:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    # Test write access
+                    test_file = path.parent / "test_write.tmp"
+                    test_file.write_text("test")
+                    test_file.unlink()
+                    self.db_path = str(path)
+                    log.info(f"Using database path: {self.db_path}")
+                    return
+                except (PermissionError, OSError):
+                    continue
+
+            # If all else fails, use memory database
+            self.db_path = ":memory:"
+            log.warning("Using in-memory database as fallback")
+
+        except Exception as e:
+            # Absolute fallback
+            self.db_path = ":memory:"
+            log.error(f"Database path setup failed: {e}. Using in-memory database")
 
     def _initialize_database(self):
         """Initialize the database and create tables if they don't exist."""

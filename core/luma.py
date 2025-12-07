@@ -78,7 +78,7 @@ class Luma(commands.Cog):
         )
 
         # Initialize event database
-        self.event_db = EventDatabase()
+        self.event_db = EventDatabase(cog_instance=self)
 
         # Default configuration - global settings
         self.config.register_global(update_interval_hours=24, last_update=None)
