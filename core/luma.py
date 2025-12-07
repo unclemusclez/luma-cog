@@ -358,6 +358,9 @@ class Luma(commands.Cog):
             if not events:
                 return
 
+            # Get subscriptions for building clickable links
+            subscriptions = await self.config.guild(guild).subscriptions()
+
             embed = discord.Embed(
                 title=f"📅 Upcoming Events - {group_name}",
                 color=discord.Color.blue(),
@@ -372,8 +375,23 @@ class Luma(commands.Cog):
                 time_str = start_time.strftime("%Y-%m-%d %H:%M UTC")
 
                 description += f"**{event.name}**\n"
+
+                # Add subscription name as clickable link if available
+                subscription = None
+                for sub_id, sub_data in subscriptions.items():
+                    sub = Subscription.from_dict(sub_data)
+                    if sub.api_id == event.calendar_api_id:
+                        subscription = sub
+                        break
+
+                if subscription:
+                    description += f"from [{subscription.name}](https://luma.com/{subscription.slug})\n"
+                else:
+                    # Fallback to API ID if subscription not found
+                    description += f"from {event.calendar_api_id}\n"
+
                 description += f"🕐 {time_str}\n"
-                description += f"🔗 https://luma.com/{event.url}\n\n"
+                description += f"🔗 [View Event](https://luma.com/{event.url})\n\n"
 
             embed.description = description
 
@@ -994,6 +1012,7 @@ class Luma(commands.Cog):
                                     "event_type": event.event_type,
                                     "url": event.url,
                                     "subscription_name": subscription.name,
+                                    "calendar_api_id": subscription.api_id,  # Add for consistency
                                 },
                             )()
                             all_events.append(event_with_subscription)
@@ -1048,10 +1067,29 @@ class Luma(commands.Cog):
                     else:
                         time_display = time_str
 
-                    # Create event title with subscription
+                    # Create event title with clickable subscription link
                     event_title = f"**{event.name}**"
                     if hasattr(event, "subscription_name"):
-                        event_title += f"\n*from {event.subscription_name}*"
+                        # Find the subscription to get its slug for the link
+                        subscription_obj = None
+                        for sub_id, sub_data in subscriptions.items():
+                            sub = Subscription.from_dict(sub_data)
+                            # Use calendar_api_id if available, otherwise fallback to name matching
+                            if (
+                                hasattr(event, "calendar_api_id")
+                                and sub.api_id == event.calendar_api_id
+                            ):
+                                subscription_obj = sub
+                                break
+                            elif sub.name == event.subscription_name:
+                                subscription_obj = sub
+                                break
+
+                        if subscription_obj:
+                            event_title += f"\nfrom [{event.subscription_name}](https://luma.com/{subscription_obj.slug})"
+                        else:
+                            # Fallback if subscription not found
+                            event_title += f"\nfrom {event.subscription_name}"
 
                     # Event details
                     details = f"📅 {date_str}\n🕐 {time_display}"
