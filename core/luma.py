@@ -1126,107 +1126,123 @@ class Luma(commands.Cog):
 
         group = ChannelGroup.from_dict(channel_groups[group_name])
 
-        # Check if identifier is already a known API ID
+        # Enhanced subscription lookup: check both API IDs and slugs
         subscription_api_id = None
+
+        # First, check if identifier is already a known API ID
         if subscription_identifier in subscriptions:
             subscription_api_id = subscription_identifier
         else:
-            # Try to resolve slug to API ID
-            try:
-                async with LumaAPIClient() as client:
-                    calendar_info = await client.get_calendar_info(
-                        subscription_identifier
-                    )
+            # Second, check if identifier matches any existing subscription's slug
+            for existing_api_id, sub_data in subscriptions.items():
+                subscription = Subscription.from_dict(sub_data)
+                if subscription.slug == subscription_identifier:
+                    subscription_api_id = existing_api_id
+                    break
 
-                if not calendar_info:
+            # Third, if still not found, try to resolve slug to API ID via API
+            if subscription_api_id is None:
+                try:
+                    async with LumaAPIClient() as client:
+                        calendar_info = await client.get_calendar_info(
+                            subscription_identifier
+                        )
+
+                    if not calendar_info:
+                        await ctx.send(
+                            f"No calendar found with slug `{subscription_identifier}`. "
+                            f"Please check the slug is correct and try again."
+                        )
+                        return
+
+                    subscription_api_id = calendar_info.get("api_id")
+                    if not subscription_api_id:
+                        await ctx.send(
+                            f"Could not resolve slug `{subscription_identifier}` to an API ID."
+                        )
+                        return
+
+                    # Check if this calendar is already subscribed
+                    if subscription_api_id not in subscriptions:
+                        # Auto-add the subscription if not already present
+                        subscription = Subscription(
+                            api_id=subscription_api_id,
+                            slug=calendar_info.get("slug", subscription_identifier),
+                            name=calendar_info.get("name", "Unknown Calendar"),
+                            added_by=ctx.author.id,
+                            added_at=datetime.now(timezone.utc).isoformat(),
+                        )
+                        subscriptions[subscription_api_id] = subscription.to_dict()
+                        await self.config.guild(ctx.guild).subscriptions.set(
+                            subscriptions
+                        )
+
+                        log.info(
+                            f"Auto-added subscription for calendar '{subscription.name}' "
+                            f"(slug: {subscription_identifier}) while adding to group '{group_name}'"
+                        )
+
+                        embed = discord.Embed(
+                            title="Subscription Auto-Added",
+                            description=f"Auto-added and added **{subscription.name}** to group **{group_name}**",
+                            color=discord.Color.green(),
+                        )
+                        embed.add_field(
+                            name="Slug",
+                            value=f"`{subscription_identifier}`",
+                            inline=True,
+                        )
+                        embed.add_field(
+                            name="API ID", value=f"`{subscription_api_id}`", inline=True
+                        )
+                        embed.add_field(
+                            name="Name", value=f"`{subscription.name}`", inline=True
+                        )
+                        await ctx.send(embed=embed)
+                    else:
+                        # Subscription exists, just add to group
+                        subscription = Subscription.from_dict(
+                            subscriptions[subscription_api_id]
+                        )
+                        embed = discord.Embed(
+                            title="Subscription Added to Group",
+                            description=f"Added **{subscription.name}** to group **{group_name}**",
+                            color=discord.Color.green(),
+                        )
+                        embed.add_field(
+                            name="Slug",
+                            value=f"`{subscription_identifier}`",
+                            inline=True,
+                        )
+                        embed.add_field(
+                            name="Resolved API ID",
+                            value=f"`{subscription_api_id}`",
+                            inline=True,
+                        )
+                        await ctx.send(embed=embed)
+
+                except LumaAPINotFoundError:
                     await ctx.send(
-                        f"No calendar found with slug `{subscription_identifier}`. "
-                        f"Please check the slug is correct and try again."
+                        f"Calendar with slug `{subscription_identifier}` was not found. "
+                        f"Please verify the slug is correct."
                     )
                     return
-
-                subscription_api_id = calendar_info.get("api_id")
-                if not subscription_api_id:
+                except LumaAPIRateLimitError:
                     await ctx.send(
-                        f"Could not resolve slug `{subscription_identifier}` to an API ID."
+                        "API rate limit exceeded. Please wait a moment and try again."
                     )
                     return
-
-                # Check if this calendar is already subscribed
-                if subscription_api_id not in subscriptions:
-                    # Auto-add the subscription if not already present
-                    subscription = Subscription(
-                        api_id=subscription_api_id,
-                        slug=calendar_info.get("slug", subscription_identifier),
-                        name=calendar_info.get("name", "Unknown Calendar"),
-                        added_by=ctx.author.id,
-                        added_at=datetime.now(timezone.utc).isoformat(),
+                except LumaAPIError as e:
+                    await ctx.send(
+                        f"Failed to resolve calendar slug `{subscription_identifier}`: {str(e)}"
                     )
-                    subscriptions[subscription_api_id] = subscription.to_dict()
-                    await self.config.guild(ctx.guild).subscriptions.set(subscriptions)
-
-                    log.info(
-                        f"Auto-added subscription for calendar '{subscription.name}' "
-                        f"(slug: {subscription_identifier}) while adding to group '{group_name}'"
+                    return
+                except Exception as e:
+                    log.error(f"Unexpected error resolving calendar slug: {e}")
+                    await ctx.send(
+                        f"An unexpected error occurred while resolving the calendar slug."
                     )
-
-                    embed = discord.Embed(
-                        title="Subscription Auto-Added",
-                        description=f"Auto-added and added **{subscription.name}** to group **{group_name}**",
-                        color=discord.Color.green(),
-                    )
-                    embed.add_field(
-                        name="Slug", value=f"`{subscription_identifier}`", inline=True
-                    )
-                    embed.add_field(
-                        name="API ID", value=f"`{subscription_api_id}`", inline=True
-                    )
-                    embed.add_field(
-                        name="Name", value=f"`{subscription.name}`", inline=True
-                    )
-                    await ctx.send(embed=embed)
-                else:
-                    # Subscription exists, just add to group
-                    subscription = Subscription.from_dict(
-                        subscriptions[subscription_api_id]
-                    )
-                    embed = discord.Embed(
-                        title="Subscription Added to Group",
-                        description=f"Added **{subscription.name}** to group **{group_name}**",
-                        color=discord.Color.green(),
-                    )
-                    embed.add_field(
-                        name="Slug", value=f"`{subscription_identifier}`", inline=True
-                    )
-                    embed.add_field(
-                        name="Resolved API ID",
-                        value=f"`{subscription_api_id}`",
-                        inline=True,
-                    )
-                    await ctx.send(embed=embed)
-
-            except LumaAPINotFoundError:
-                await ctx.send(
-                    f"Calendar with slug `{subscription_identifier}` was not found. "
-                    f"Please verify the slug is correct."
-                )
-                return
-            except LumaAPIRateLimitError:
-                await ctx.send(
-                    "API rate limit exceeded. Please wait a moment and try again."
-                )
-                return
-            except LumaAPIError as e:
-                await ctx.send(
-                    f"Failed to resolve calendar slug `{subscription_identifier}`: {str(e)}"
-                )
-                return
-            except Exception as e:
-                log.error(f"Unexpected error resolving calendar slug: {e}")
-                await ctx.send(
-                    f"An unexpected error occurred while resolving the calendar slug."
-                )
-                return
+                    return
 
         # At this point, we have a valid subscription_api_id
         if subscription_api_id in group.subscription_ids:
