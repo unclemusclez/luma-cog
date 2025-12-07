@@ -429,7 +429,7 @@ class EventDatabase:
 
                     cursor.execute(
                         """
-                        DELETE FROM event_history 
+                        DELETE FROM event_history
                         WHERE sent_at < ?
                     """,
                         (cutoff_date,),
@@ -444,3 +444,50 @@ class EventDatabase:
             except Exception as e:
                 log.error(f"Failed to cleanup old history: {e}")
                 return 0
+
+    async def clear_event_database(self) -> Dict[str, Any]:
+        """Clear all event tracking data from the database.
+
+        This method clears all events and event history data while preserving
+        the database structure. This is useful for testing or when you want to
+        resend notifications for existing events.
+
+        Returns:
+            Dict with counts of cleared records and success status
+        """
+        async with self._lock:
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+
+                    # Get counts before clearing
+                    cursor.execute("SELECT COUNT(*) FROM events")
+                    events_count = cursor.fetchone()[0]
+
+                    cursor.execute("SELECT COUNT(*) FROM event_history")
+                    history_count = cursor.fetchone()[0]
+
+                    # Clear all event data (preserves database structure)
+                    cursor.execute("DELETE FROM events")
+                    cursor.execute("DELETE FROM event_history")
+
+                    conn.commit()
+
+                    log.info(
+                        f"Event database cleared: {events_count} events, {history_count} history records"
+                    )
+
+                    return {
+                        "events_cleared": events_count,
+                        "history_cleared": history_count,
+                        "success": True,
+                    }
+
+            except Exception as e:
+                log.error(f"Failed to clear event database: {e}")
+                return {
+                    "events_cleared": 0,
+                    "history_cleared": 0,
+                    "success": False,
+                    "error": str(e),
+                }

@@ -1948,3 +1948,236 @@ class Luma(commands.Cog):
         except Exception as e:
             log.error(f"Error in show_events command: {e}")
             await ctx.send(f"❌ Failed to fetch events: {str(e)}")
+
+    @luma_group.group(name="events", aliases=["event"])
+    async def events_group(self, ctx: commands.Context):
+        """Event-related commands for managing event database and viewing events."""
+        if ctx.invoked_subcommand is None:
+            embed = discord.Embed(
+                title="Event Commands",
+                description="Manage event database and view events",
+                color=discord.Color.blue(),
+            )
+            embed.add_field(
+                name="Commands",
+                value="• `clear` - Clear event tracking database\n"
+                "• `show` - Display upcoming events\n"
+                "• `stats` - Show database statistics",
+                inline=False,
+            )
+            await ctx.send(embed=embed)
+
+    @events_group.command(name="clear", aliases=["reset"])
+    @checks.admin_or_permissions(manage_guild=True)
+    async def clear_events_database(self, ctx: commands.Context):
+        """Clear the event tracking database to enable resending notifications.
+
+        This command clears only the event tracking database that prevents
+        duplicate notifications. It preserves all your configuration including:
+        • All calendar subscriptions
+        • All channel groups
+        • All configuration settings
+
+        After clearing, all events will be treated as new and can be resent.
+        This is useful for testing or when you want to resend notifications
+        for events that were previously sent.
+
+        Example:
+        `[p]luma events clear` - Clear event tracking database
+        """
+        # Get current database stats for confirmation
+        try:
+            stats = await self.event_db.get_calendar_stats()
+            total_events = stats.get("total_events", 0)
+            total_sends = stats.get("total_sends", 0)
+        except Exception:
+            total_events = 0
+            total_sends = 0
+
+        embed = discord.Embed(
+            title="⚠️ Clear Event Database",
+            description="This will clear the event tracking database including:\n"
+            f"• {total_events} tracked events\n"
+            f"• {total_sends} send history records\n\n"
+            "**PRESERVED:**\n"
+            "• All calendar subscriptions\n"
+            "• All channel groups\n"
+            "• All configuration settings\n\n"
+            "**After clearing, all events will be treated as new.**",
+            color=discord.Color.orange(),
+        )
+        embed.add_field(
+            name="Confirmation Required",
+            value="React with ✅ to confirm or ❌ to cancel.",
+            inline=False,
+        )
+
+        message = await ctx.send(embed=embed)
+        await message.add_reaction("✅")
+        await message.add_reaction("❌")
+
+        def check(reaction, user):
+            return (
+                user == ctx.author
+                and reaction.message.id == message.id
+                and reaction.emoji in ["✅", "❌"]
+            )
+
+        try:
+            reaction, user = await self.bot.wait_for(
+                "reaction_add", timeout=60.0, check=check
+            )
+
+            if reaction.emoji == "✅":
+                try:
+                    # Clear the event database
+                    result = await self.event_db.clear_event_database()
+
+                    if result["success"]:
+                        embed.title = "✅ Event Database Cleared"
+                        embed.description = (
+                            f"Successfully cleared event tracking database:\n"
+                            f"• {result['events_cleared']} events cleared\n"
+                            f"• {result['history_cleared']} history records cleared\n\n"
+                            f"All events will now be treated as new and can be resent."
+                        )
+                        embed.color = discord.Color.green()
+
+                        log.info(
+                            f"User {ctx.author.id} cleared event database for guild {ctx.guild.id}: "
+                            f"{result['events_cleared']} events, {result['history_cleared']} history records"
+                        )
+                    else:
+                        embed.title = "❌ Failed to Clear Database"
+                        embed.description = f"Failed to clear event database: {result.get('error', 'Unknown error')}"
+                        embed.color = discord.Color.red()
+
+                except Exception as e:
+                    log.error(f"Failed to clear event database: {e}")
+                    embed.title = "❌ Error"
+                    embed.description = (
+                        f"An error occurred while clearing the database: {str(e)}"
+                    )
+                    embed.color = discord.Color.red()
+
+                await message.edit(embed=embed)
+
+            else:
+                embed.title = "❌ Clear Cancelled"
+                embed.description = (
+                    "Event database clear was cancelled. No changes were made."
+                )
+                embed.color = discord.Color.blue()
+                await message.edit(embed=embed)
+
+        except asyncio.TimeoutError:
+            embed.title = "⏰ Clear Cancelled"
+            embed.description = "Confirmation timed out. No changes were made."
+            embed.color = discord.Color.orange()
+            await message.edit(embed=embed)
+
+    @luma_group.command(name="database")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def database_commands(self, ctx: commands.Context):
+        """Database management commands."""
+        # Delegate to the events clear command
+        await ctx.invoke(self.clear_events_database)
+
+    @events_group.command(name="show")
+    async def show_events_wrapper(self, ctx: commands.Context):
+        """Display upcoming events with improved formatting and actual URLs.
+
+        Shows events from all subscriptions with:
+        - Human-readable date/time formatting
+        - Actual event URLs instead of just slugs
+        - Event type and timezone information
+        - Better overall formatting
+
+        Example:
+        `[p]luma events show` - Show upcoming events with detailed formatting
+        """
+        # Call the existing show_events method
+        await self.show_events(ctx)
+
+    @events_group.command(name="stats")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def event_database_stats(self, ctx: commands.Context):
+        """Show event database statistics and tracking information.
+
+        Displays information about:
+        • Total tracked events across all calendars
+        • Number of calendars being tracked
+        • Total message sends recorded
+        • Per-calendar event counts
+
+        Example:
+        `[p]luma events stats` - View database statistics
+        """
+        try:
+            stats = await self.event_db.get_calendar_stats()
+
+            embed = discord.Embed(
+                title="📊 Event Database Statistics",
+                description="Current event tracking database status:",
+                color=discord.Color.blue(),
+            )
+
+            # Add overall stats
+            total_events = stats.get("total_events", 0)
+            total_calendars = stats.get("total_calendars", 0)
+            total_sends = stats.get("total_sends", 0)
+
+            embed.add_field(
+                name="Overall Statistics",
+                value=f"📅 **Total Events:** {total_events}\n"
+                f"📆 **Calendars Tracked:** {total_calendars}\n"
+                f"📨 **Messages Sent:** {total_sends}",
+                inline=False,
+            )
+
+            # Add per-calendar stats
+            calendar_stats = stats.get("calendar_stats", [])
+            if calendar_stats:
+                calendar_info = []
+                for cal_stat in calendar_stats[:5]:  # Limit to 5 calendars
+                    calendar_info.append(
+                        f"📋 `{cal_stat['calendar_api_id'][:12]}...` - {cal_stat['event_count']} events"
+                    )
+
+                if len(calendar_stats) > 5:
+                    calendar_info.append(
+                        f"... and {len(calendar_stats) - 5} more calendars"
+                    )
+
+                embed.add_field(
+                    name="Calendar Breakdown",
+                    value="\n".join(calendar_info),
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name="Calendar Breakdown",
+                    value="No calendars currently tracked",
+                    inline=False,
+                )
+
+            # Add helpful info
+            embed.add_field(
+                name="What This Means",
+                value="• **Events:** Unique events stored in database\n"
+                "• **Calendars:** Different calendars being monitored\n"
+                "• **Messages:** Total notifications sent to channels\n\n"
+                "Use `[p]luma events clear` to reset tracking data.",
+                inline=False,
+            )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            log.error(f"Failed to get database stats: {e}")
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"Failed to get database statistics: {str(e)}",
+                color=discord.Color.red(),
+            )
+            await ctx.send(embed=embed)
