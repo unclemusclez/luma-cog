@@ -693,7 +693,7 @@ class Luma(commands.Cog):
 
         # Build event URL and add link
         event_url = f"https://lu.ma/{event.url}" if event.url else "https://lu.ma"
-        description += f"\n🔗 [View Event](<{event_url}>)"
+        description += f"\n🔗 [View Event]({event_url})"
 
         embed.description = description
         embed.set_footer(text=f"From: {group_name}")
