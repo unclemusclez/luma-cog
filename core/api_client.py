@@ -280,6 +280,7 @@ class LumaAPIClient:
 
             # Parse the response into Event objects
             events = []
+            seen_api_ids = set()  # Track seen event api_ids to prevent duplicates
 
             # Check if we have a Model response (from the existing Pydantic models)
             if isinstance(response_data, dict) and "calendar" in response_data:
@@ -298,6 +299,15 @@ class LumaAPIClient:
                     # Extract events from featured_items with their hosts and calendar info
                     for featured_item in model.featured_items:
                         if hasattr(featured_item, "event") and featured_item.event:
+                            # Skip if we've already seen this event api_id
+                            event_api_id = getattr(featured_item.event, "api_id", None)
+                            if event_api_id and event_api_id in seen_api_ids:
+                                continue
+
+                            # Mark this api_id as seen
+                            if event_api_id:
+                                seen_api_ids.add(event_api_id)
+
                             # Ensure we have calendar data, fallback to the calendar_data from API response
                             event_calendar = getattr(
                                 featured_item, "calendar", calendar_data
@@ -353,8 +363,16 @@ class LumaAPIClient:
                     try:
                         if isinstance(event_data, dict):
                             event = Event(**event_data)
-                            # Wrap with hosts if available
+
+                            # Skip if we've already seen this event api_id
                             event_id = event_data.get("api_id", "unknown")
+                            if event_id in seen_api_ids:
+                                continue
+
+                            # Mark this api_id as seen
+                            seen_api_ids.add(event_id)
+
+                            # Wrap with hosts if available
                             if event_id in hosts_data:
                                 # Ensure we have calendar data, use the best available source
                                 event_calendar = calendar_data
@@ -430,7 +448,7 @@ class LumaAPIClient:
                         continue
 
             log.info(
-                f"Successfully fetched {len(events)} events from calendar {calendar_api_id}"
+                f"Successfully fetched {len(events)} unique events from calendar {calendar_api_id}"
             )
             return events[:limit]  # Ensure we don't exceed the requested limit
 
