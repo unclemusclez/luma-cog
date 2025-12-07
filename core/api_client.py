@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
 
@@ -49,7 +49,7 @@ class LumaCacheEntry:
         self.expires_at = expires_at
 
     def is_expired(self) -> bool:
-        return datetime.utcnow() >= self.expires_at
+        return datetime.now(timezone.utc) >= self.expires_at
 
 
 class LumaAPIClient:
@@ -105,7 +105,7 @@ class LumaAPIClient:
 
     def _cache_response(self, cache_key: str, data: Any) -> None:
         """Cache a response with TTL."""
-        expires_at = datetime.utcnow() + timedelta(seconds=self.CACHE_TTL)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=self.CACHE_TTL)
         self._cache[cache_key] = LumaCacheEntry(data, expires_at)
         log.debug(f"Cached response for {cache_key}")
 

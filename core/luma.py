@@ -1,8 +1,7 @@
 import sys
 import asyncio
 import logging
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 import discord
 from redbot.core import Config, commands, checks
@@ -138,7 +137,7 @@ class Luma(commands.Cog):
             except Exception as e:
                 log.error(f"Error updating events for guild {guild.id}: {e}")
 
-        await self.config.last_update.set(datetime.utcnow().isoformat())
+        await self.config.last_update.set(datetime.now(timezone.utc).isoformat())
 
     async def update_guild_events(self, guild: discord.Guild):
         """Update events for a specific guild."""
@@ -171,7 +170,7 @@ class Luma(commands.Cog):
 
         # Sort events by start time and limit to recent events
         events.sort(key=lambda x: x.start_at)
-        cutoff_date = datetime.utcnow() - timedelta(
+        cutoff_date = datetime.now(timezone.utc) - timedelta(
             days=1
         )  # Show events from yesterday onwards
 
@@ -245,7 +244,7 @@ class Luma(commands.Cog):
             embed = discord.Embed(
                 title=f"📅 Upcoming Events - {group_name}",
                 color=discord.Color.blue(),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
 
             description = ""
@@ -346,7 +345,7 @@ class Luma(commands.Cog):
             slug=slug,
             name=name,
             added_by=ctx.author.id,
-            added_at=datetime.utcnow().isoformat(),
+            added_at=datetime.now(timezone.utc).isoformat(),
         )
 
         subscriptions[api_id] = subscription.to_dict()
@@ -441,7 +440,7 @@ class Luma(commands.Cog):
             subscription_ids=[],
             max_events=max_events,
             created_by=ctx.author.id,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
         channel_groups[name] = group.to_dict()

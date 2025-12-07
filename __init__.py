@@ -1,15 +1,10 @@
 from .core.luma import Luma
 
-# from .calendar_get import Event, Model
-# from .data_models import Subscription, ChannelGroup, LumaConfig
 
-# __all__ = ["Event", "Model", "Subscription", "ChannelGroup", "LumaConfig"]
-
-
-def setup(bot):
+async def setup(bot):
     """
-    Luma Cog setup
+    Luma Cog setup for RedBot 3.5+
 
-    :param bot: Description
+    :param bot: The RedBot instance
     """
-    bot.add_cog(Luma(bot))
+    await bot.add_cog(Luma(bot))
