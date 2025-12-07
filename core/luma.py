@@ -204,28 +204,44 @@ class Luma(commands.Cog):
             if datetime.fromisoformat(e.start_at.replace("Z", "+00:00")) >= cutoff_date
         ]
 
-        # For automatic updates, only include new events
+        # For automatic updates, only include events that are actually new
         if check_for_changes:
+            # Use the new events detected by the database, not all events
+            # We need to re-fetch to get the actual new events from each subscription
+            all_new_events = []
+            for sub_id in group.subscription_ids:
+                if sub_id in subscriptions:
+                    subscription = Subscription.from_dict(subscriptions[sub_id])
+                    try:
+                        result = await self.fetch_events_from_subscription(
+                            subscription, check_for_changes
+                        )
+                        all_new_events.extend(result["new_events"])
+                    except Exception as e:
+                        log.error(
+                            f"Error getting new events for subscription {sub_id}: {e}"
+                        )
+
+            # Sort and filter new events
+            all_new_events.sort(key=lambda x: x.start_at)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=1)
             new_filtered_events = [
                 e
-                for e in filtered_events
-                if any(e.api_id == new_event.api_id for new_event in all_events)
+                for e in all_new_events
+                if datetime.fromisoformat(e.start_at.replace("Z", "+00:00"))
+                >= cutoff_date
             ]
-            return {
-                "events": new_filtered_events[
-                    : group.max_events
-                ],  # Limit to max_events per group
-                "new_events_count": total_new_events,
-                "change_stats": change_stats,
-            }
         else:
-            return {
-                "events": filtered_events[
-                    : group.max_events
-                ],  # Limit to max_events per group
-                "new_events_count": total_new_events,
-                "change_stats": change_stats,
-            }
+            # For manual updates, include all recent events
+            new_filtered_events = filtered_events
+
+        return {
+            "events": new_filtered_events[
+                : group.max_events
+            ],  # Limit to max_events per group
+            "new_events_count": total_new_events,
+            "change_stats": change_stats,
+        }
 
     async def fetch_events_from_subscription(
         self, subscription: Subscription, check_for_changes: bool = True
@@ -963,10 +979,24 @@ class Luma(commands.Cog):
                             limit=20,  # Fetch more events for manual display
                         )
 
-                        # Add subscription info to each event
+                        # Create events with subscription info for display purposes
                         for event in events:
-                            event.subscription_name = subscription.name
-                            all_events.append(event)
+                            # Create a simple event wrapper that includes subscription info
+                            event_with_subscription = type(
+                                "EventWithSubscription",
+                                (),
+                                {
+                                    "api_id": event.api_id,
+                                    "name": event.name,
+                                    "start_at": event.start_at,
+                                    "end_at": event.end_at,
+                                    "timezone": event.timezone,
+                                    "event_type": event.event_type,
+                                    "url": event.url,
+                                    "subscription_name": subscription.name,
+                                },
+                            )()
+                            all_events.append(event_with_subscription)
 
                     except Exception as e:
                         log.error(
