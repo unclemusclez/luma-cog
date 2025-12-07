@@ -254,8 +254,14 @@ class Luma(commands.Cog):
         self, group: ChannelGroup, subscriptions: Dict, check_for_changes: bool = True
     ) -> Dict[str, Any]:
         """Fetch events for a specific channel group with change detection."""
+        log.debug(
+            f"fetch_events_for_group: Processing group '{group.name}', "
+            f"subscriptions: {group.subscription_ids}, check_for_changes: {check_for_changes}"
+        )
+
         all_events = []
         seen_api_ids = set()  # Track seen api_ids to prevent duplicates
+        all_new_events = []  # Collect new events during initial fetch
         total_new_events = 0
         change_stats = {"new_events": 0, "updated_events": 0, "deleted_events": 0}
 
@@ -266,12 +272,25 @@ class Luma(commands.Cog):
                     result = await self.fetch_events_from_subscription(
                         subscription, check_for_changes
                     )
+                    log.debug(
+                        f"Subscription {subscription.name} ({subscription.api_id}): "
+                        f"fetched {len(result['events'])} events, "
+                        f"{len(result['new_events'])} new events, "
+                        f"change_stats: {result['change_stats']}"
+                    )
+
                     # Deduplicate events based on api_id to prevent same event from multiple calendars
                     for event in result["events"]:
                         if event.api_id not in seen_api_ids:
                             all_events.append(event)
                             seen_api_ids.add(event.api_id)
+                        else:
+                            log.debug(
+                                f"Deduplicating event {event.api_id} from subscription {subscription.name}"
+                            )
 
+                    # CRITICAL FIX: Collect new events during the initial fetch
+                    all_new_events.extend(result["new_events"])
                     total_new_events += len(result["new_events"])
 
                     # Aggregate change stats
@@ -281,6 +300,11 @@ class Luma(commands.Cog):
 
                 except Exception as e:
                     log.error(f"Error fetching events for subscription {sub_id}: {e}")
+
+        log.debug(
+            f"After initial processing: {len(all_events)} unique events, "
+            f"{len(all_new_events)} total new events, seen_api_ids: {len(seen_api_ids)}"
+        )
 
         # Sort events by start time and limit to recent events
         all_events.sort(key=lambda x: x.start_at)
@@ -294,26 +318,15 @@ class Luma(commands.Cog):
             if datetime.fromisoformat(e.start_at.replace("Z", "+00:00")) >= cutoff_date
         ]
 
+        log.debug(f"After filtering by cutoff date: {len(filtered_events)} events")
+
         # For automatic updates, only include events that are actually new
         if check_for_changes:
-            # Use the new events detected by the database, not all events
-            all_new_events = []
-            actual_new_events_count = 0
+            log.debug(
+                "Processing for automatic updates - using pre-collected new events"
+            )
 
-            for sub_id in group.subscription_ids:
-                if sub_id in subscriptions:
-                    subscription = Subscription.from_dict(subscriptions[sub_id])
-                    try:
-                        result = await self.fetch_events_from_subscription(
-                            subscription, check_for_changes
-                        )
-                        all_new_events.extend(result["new_events"])
-                        actual_new_events_count += len(result["new_events"])
-                    except Exception as e:
-                        log.error(
-                            f"Error getting new events for subscription {sub_id}: {e}"
-                        )
-
+            # CRITICAL FIX: Use the new events already collected during initial fetch
             # Sort and filter new events
             all_new_events.sort(key=lambda x: x.start_at)
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=1)
@@ -324,15 +337,36 @@ class Luma(commands.Cog):
                 >= cutoff_date
             ]
 
-            # For automatic updates, return the new events (not all filtered events)
-            events_to_return = new_filtered_events[: group.max_events]
+            # CRITICAL FIX: Deduplicate new events based on api_id to prevent duplicates
+            seen_new_api_ids = set()
+            deduplicated_new_events = []
+            for event in new_filtered_events:
+                if event.api_id not in seen_new_api_ids:
+                    deduplicated_new_events.append(event)
+                    seen_new_api_ids.add(event.api_id)
+                else:
+                    log.debug(f"Deduplicating NEW event {event.api_id}")
 
-            # Use the actual count of new events that will be sent, not total count
+            log.debug(f"New events after deduplication: {len(deduplicated_new_events)}")
+
+            # For automatic updates, return the new events (not all filtered events)
+            events_to_return = deduplicated_new_events[: group.max_events]
+
+            # Use the actual count of new events that will be sent
             new_events_count = len(events_to_return)
+
+            log.debug(
+                f"Final result: {new_events_count} new events will be sent "
+                f"(out of {len(all_new_events)} detected, "
+                f"limited to {group.max_events} max per group)"
+            )
         else:
             # For manual updates, include all recent events
             events_to_return = filtered_events[: group.max_events]
             new_events_count = total_new_events
+            log.debug(
+                f"Manual update mode: returning {len(events_to_return)} events, {new_events_count} marked as new"
+            )
 
         return {
             "events": events_to_return,
