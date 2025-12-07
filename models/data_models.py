@@ -30,9 +30,13 @@ class ChannelGroup:
     max_events: int
     created_by: int
     created_at: str
+    timezone: Optional[str] = None  # Group-specific timezone for event display
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ChannelGroup":
+        # Handle backward compatibility for existing groups without timezone
+        if "timezone" not in data:
+            data["timezone"] = None
         return cls(**data)
 
     def to_dict(self) -> Dict[str, Any]:

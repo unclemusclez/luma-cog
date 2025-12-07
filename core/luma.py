@@ -2,7 +2,7 @@ import sys
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
+from typing import Dict, List, Any, Optional
 import discord
 from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
@@ -16,6 +16,7 @@ from .api_client import (
     LumaAPIRateLimitError,
     LumaAPINotFoundError,
 )
+from .database import EventDatabase
 
 
 log = logging.getLogger("red.luma")
@@ -75,6 +76,9 @@ class Luma(commands.Cog):
         self.config = Config.get_conf(
             self, identifier=928374927364, force_registration=True
         )
+
+        # Initialize event database
+        self.event_db = EventDatabase()
 
         # Default configuration - global settings
         self.config.register_global(update_interval_hours=24, last_update=None)
@@ -146,83 +150,186 @@ class Luma(commands.Cog):
 
         for group_name, group_data in channel_groups.items():
             group = ChannelGroup.from_dict(group_data)
-            events = await self.fetch_events_for_group(group, subscriptions)
+            result = await self.fetch_events_for_group(
+                group, subscriptions, check_for_changes=True
+            )
 
-            if events:
-                await self.send_events_to_channel(
-                    group.channel_id, events, guild, group_name
+            # Only send message if there are new events
+            if result["events"] and result["new_events_count"] > 0:
+                log.info(
+                    f"Sending {len(result['events'])} new events to group '{group_name}' "
+                    f"(detected {result['new_events_count']} new events)"
                 )
+                await self.send_events_to_channel(
+                    group.channel_id, result["events"], guild, group_name
+                )
+            else:
+                log.debug(f"No new events for group '{group_name}', skipping update")
 
     async def fetch_events_for_group(
-        self, group: ChannelGroup, subscriptions: Dict
-    ) -> List[Event]:
-        """Fetch events for a specific channel group."""
-        events = []
+        self, group: ChannelGroup, subscriptions: Dict, check_for_changes: bool = True
+    ) -> Dict[str, Any]:
+        """Fetch events for a specific channel group with change detection."""
+        all_events = []
+        total_new_events = 0
+        change_stats = {"new_events": 0, "updated_events": 0, "deleted_events": 0}
 
         for sub_id in group.subscription_ids:
             if sub_id in subscriptions:
                 subscription = Subscription.from_dict(subscriptions[sub_id])
                 try:
-                    sub_events = await self.fetch_events_from_subscription(subscription)
-                    events.extend(sub_events)
+                    result = await self.fetch_events_from_subscription(
+                        subscription, check_for_changes
+                    )
+                    all_events.extend(result["events"])
+                    total_new_events += len(result["new_events"])
+
+                    # Aggregate change stats
+                    for key in change_stats:
+                        if key in result["change_stats"]:
+                            change_stats[key] += result["change_stats"][key]
+
                 except Exception as e:
                     log.error(f"Error fetching events for subscription {sub_id}: {e}")
 
         # Sort events by start time and limit to recent events
-        events.sort(key=lambda x: x.start_at)
+        all_events.sort(key=lambda x: x.start_at)
         cutoff_date = datetime.now(timezone.utc) - timedelta(
             days=1
         )  # Show events from yesterday onwards
 
         filtered_events = [
             e
-            for e in events
+            for e in all_events
             if datetime.fromisoformat(e.start_at.replace("Z", "+00:00")) >= cutoff_date
         ]
-        return filtered_events[: group.max_events]  # Limit to max_events per group
+
+        # For automatic updates, only include new events
+        if check_for_changes:
+            new_filtered_events = [
+                e
+                for e in filtered_events
+                if any(
+                    e.api_id == new_event["api_id"]
+                    for new_event in [
+                        event.to_dict() if hasattr(event, "to_dict") else event
+                        for event in all_events
+                    ]
+                )
+            ]
+            return {
+                "events": new_filtered_events[
+                    : group.max_events
+                ],  # Limit to max_events per group
+                "new_events_count": total_new_events,
+                "change_stats": change_stats,
+            }
+        else:
+            return {
+                "events": filtered_events[
+                    : group.max_events
+                ],  # Limit to max_events per group
+                "new_events_count": total_new_events,
+                "change_stats": change_stats,
+            }
 
     async def fetch_events_from_subscription(
-        self, subscription: Subscription
-    ) -> List[Event]:
-        """Fetch events from a Luma calendar subscription using the real API."""
+        self, subscription: Subscription, check_for_changes: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Fetch events from a Luma calendar subscription using the real API.
+
+        Args:
+            subscription: The subscription to fetch events for
+            check_for_changes: Whether to check for changes using the database
+
+        Returns:
+            Dict with 'events', 'new_events', 'change_stats'
+        """
         try:
             # Create a temporary HTTP session for this request
             async with LumaAPIClient() as client:
                 # Fetch events from the calendar using its api_id
                 events = await client.get_calendar_events(
-                    calendar_api_id=subscription.api_id,
+                    calendar_identifier=subscription.api_id,
                     limit=100,  # Fetch up to 100 events per subscription
                 )
 
-                log.info(
-                    f"Successfully fetched {len(events)} events from subscription {subscription.name}"
-                )
-                return events
+                # Convert events to dict format for database operations
+                event_dicts = []
+                for event in events:
+                    event_dict = {
+                        "api_id": event.api_id,
+                        "calendar_api_id": subscription.api_id,
+                        "name": event.name,
+                        "start_at": event.start_at,
+                        "end_at": event.end_at,
+                        "timezone": event.timezone,
+                        "event_type": event.event_type,
+                        "url": event.url,
+                        "last_modified": datetime.now(timezone.utc).isoformat(),
+                    }
+                    event_dicts.append(event_dict)
+
+                if check_for_changes:
+                    # Use database to track changes
+                    change_stats = await self.event_db.upsert_events(
+                        event_dicts, subscription.api_id
+                    )
+                    new_events = await self.event_db.get_new_events(
+                        subscription.api_id, event_dicts
+                    )
+
+                    log.info(
+                        f"Successfully fetched {len(events)} events from subscription {subscription.name}. "
+                        f"Changes: {change_stats['new_events']} new, {change_stats['updated_events']} updated, "
+                        f"{change_stats['deleted_events']} deleted"
+                    )
+
+                    return {
+                        "events": events,
+                        "new_events": new_events,
+                        "change_stats": change_stats,
+                    }
+                else:
+                    # Just return all events without change tracking
+                    log.info(
+                        f"Successfully fetched {len(events)} events from subscription {subscription.name}"
+                    )
+                    return {
+                        "events": events,
+                        "new_events": events,  # Treat all as new for manual commands
+                        "change_stats": {
+                            "new_events": len(events),
+                            "updated_events": 0,
+                            "deleted_events": 0,
+                        },
+                    }
 
         except LumaAPINotFoundError:
             log.error(
                 f"Calendar {subscription.slug} not found for subscription {subscription.name}"
             )
-            return []
+            return {"events": [], "new_events": [], "change_stats": {}}
 
         except LumaAPIRateLimitError:
             log.warning(
                 f"Rate limit exceeded while fetching events for subscription {subscription.name}"
             )
             # Return empty list on rate limit - don't crash the entire update process
-            return []
+            return {"events": [], "new_events": [], "change_stats": {}}
 
         except LumaAPIError as e:
             log.error(
                 f"API error while fetching events for subscription {subscription.name}: {e}"
             )
-            return []
+            return {"events": [], "new_events": [], "change_stats": {}}
 
         except Exception as e:
             log.error(
                 f"Unexpected error while fetching events for subscription {subscription.name}: {e}"
             )
-            return []
+            return {"events": [], "new_events": [], "change_stats": {}}
 
     async def send_events_to_channel(
         self,
@@ -420,6 +527,7 @@ class Luma(commands.Cog):
         name: str,
         channel: discord.TextChannel,
         max_events: int = 10,
+        group_timezone: Optional[str] = None,
     ):
         """Create a new channel group for displaying events.
 
@@ -427,6 +535,7 @@ class Luma(commands.Cog):
         - name: Name of the group
         - channel: Discord channel to display events in
         - max_events: Maximum number of events to show (default: 10)
+        - group_timezone: Optional timezone for displaying event times (e.g., 'America/New_York')
         """
         channel_groups = await self.config.guild(ctx.guild).channel_groups()
 
@@ -441,6 +550,7 @@ class Luma(commands.Cog):
             max_events=max_events,
             created_by=ctx.author.id,
             created_at=datetime.now(timezone.utc).isoformat(),
+            timezone=group_timezone,
         )
 
         channel_groups[name] = group.to_dict()
@@ -453,6 +563,42 @@ class Luma(commands.Cog):
         )
         embed.add_field(name="Channel", value=channel.mention, inline=True)
         embed.add_field(name="Max Events", value=str(max_events), inline=True)
+        if group_timezone:
+            embed.add_field(name="Timezone", value=group_timezone, inline=True)
+        else:
+            embed.add_field(name="Timezone", value="Default (from event)", inline=True)
+
+        await ctx.send(embed=embed)
+
+    @groups_group.command(name="timezone", aliases=["tz"])
+    @checks.admin_or_permissions(manage_guild=True)
+    async def set_group_timezone(
+        self, ctx: commands.Context, group_name: str, timezone: str
+    ):
+        """Set timezone for a channel group.
+
+        Parameters:
+        - group_name: Name of the group to update
+        - timezone: Timezone to use (e.g., 'America/New_York', 'UTC')
+        """
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        group = ChannelGroup.from_dict(channel_groups[group_name])
+        group.timezone = timezone
+
+        channel_groups[group_name] = group.to_dict()
+        await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+        embed = discord.Embed(
+            title="Group Timezone Updated",
+            description=f"Updated timezone for group: **{group_name}**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Timezone", value=timezone, inline=True)
 
         await ctx.send(embed=embed)
 
@@ -780,3 +926,147 @@ class Luma(commands.Cog):
             embed.description = "Confirmation timed out. No changes were made."
             embed.color = discord.Color.orange()
             await message.edit(embed=embed)
+
+    @luma_group.command(name="events")
+    @commands.guild_only()
+    async def show_events(self, ctx: commands.Context):
+        """
+        Display upcoming events with improved formatting and actual URLs.
+
+        Shows events from all subscriptions with:
+        - Human-readable date/time formatting
+        - Actual event URLs instead of just slugs
+        - Event type and timezone information
+        - Better overall formatting
+
+        Example:
+        `[p]luma events` - Show upcoming events with detailed formatting
+        """
+        subscriptions = await self.config.guild(ctx.guild).subscriptions()
+
+        if not subscriptions:
+            await ctx.send(
+                "No subscriptions configured. Use `luma subscriptions add` to add one."
+            )
+            return
+
+        embed = discord.Embed(
+            title="📅 Upcoming Events",
+            description="Here's what we have coming up:",
+            color=discord.Color.blue(),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        all_events = []
+
+        try:
+            async with LumaAPIClient() as client:
+                for sub_id, sub_data in subscriptions.items():
+                    subscription = Subscription.from_dict(sub_data)
+                    try:
+                        events = await client.get_calendar_events(
+                            calendar_identifier=subscription.api_id,
+                            limit=20,  # Fetch more events for manual display
+                        )
+
+                        # Add subscription info to each event
+                        for event in events:
+                            event.subscription_name = subscription.name
+                            all_events.append(event)
+
+                    except Exception as e:
+                        log.error(
+                            f"Error fetching events for subscription {subscription.name}: {e}"
+                        )
+                        continue
+
+            if not all_events:
+                embed.description = "No upcoming events found."
+                await ctx.send(embed=embed)
+                return
+
+            # Sort events by start time
+            all_events.sort(key=lambda x: x.start_at)
+
+            # Limit to recent events (next 30 days)
+            cutoff_date = datetime.now(timezone.utc) + timedelta(days=30)
+            recent_events = [
+                event
+                for event in all_events
+                if datetime.fromisoformat(event.start_at.replace("Z", "+00:00"))
+                <= cutoff_date
+            ]
+
+            if not recent_events:
+                embed.description = "No events in the next 30 days."
+                await ctx.send(embed=embed)
+                return
+
+            # Display events in embed
+            for event in recent_events[:10]:  # Limit to 10 events per message
+                try:
+                    start_time = datetime.fromisoformat(
+                        event.start_at.replace("Z", "+00:00")
+                    )
+                    end_time = (
+                        datetime.fromisoformat(event.end_at.replace("Z", "+00:00"))
+                        if event.end_at
+                        else None
+                    )
+
+                    # Format date/time nicely
+                    date_str = start_time.strftime("%A, %B %d, %Y")
+                    time_str = start_time.strftime("%I:%M %p")
+
+                    if end_time:
+                        end_time_str = end_time.strftime("%I:%M %p")
+                        time_display = f"{time_str} - {end_time_str}"
+                    else:
+                        time_display = time_str
+
+                    # Create event title with subscription
+                    event_title = f"**{event.name}**"
+                    if hasattr(event, "subscription_name"):
+                        event_title += f"\n*from {event.subscription_name}*"
+
+                    # Event details
+                    details = f"📅 {date_str}\n🕐 {time_display}"
+
+                    if event.timezone:
+                        details += f"\n🌍 Timezone: {event.timezone}"
+
+                    if event.event_type:
+                        details += f"\n📋 Type: {event.event_type.title()}"
+
+                    # Add location if available
+                    if hasattr(event, "geo_address_info") and event.geo_address_info:
+                        location = event.geo_address_info
+                        if location.city_state:
+                            details += f"\n📍 {location.city_state}"
+
+                    # Add actual URL instead of just slug
+                    if event.url:
+                        details += f"\n🔗 [View Event]({event.url})"
+
+                    embed.add_field(
+                        name=event_title,
+                        value=details,
+                        inline=False,
+                    )
+
+                except Exception as e:
+                    log.warning(f"Error formatting event {event.name}: {e}")
+                    continue
+
+            if len(recent_events) > 10:
+                embed.add_field(
+                    name="And more...",
+                    value=f"{len(recent_events) - 10} more events available",
+                    inline=False,
+                )
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            log.error(f"Error in show_events command: {e}")
+            await ctx.send(f"❌ Failed to fetch events: {str(e)}")

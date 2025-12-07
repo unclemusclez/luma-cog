@@ -229,19 +229,40 @@ class LumaAPIClient:
         raise LumaAPIError(f"Request failed after {self.MAX_RETRIES} attempts")
 
     async def get_calendar_events(
-        self, calendar_api_id: str, limit: int = 50
+        self, calendar_identifier: str, limit: int = 50, is_slug: bool = False
     ) -> List[Event]:
         """
         Fetch events from a Luma calendar.
 
         Args:
-            calendar_api_id: The API ID of the calendar
+            calendar_identifier: The API ID or slug of the calendar
             limit: Maximum number of events to fetch
+            is_slug: True if identifier is a slug, False if it's an API ID
 
         Returns:
             List of Event objects
         """
         try:
+            if is_slug:
+                # First get calendar info using slug, then use the API ID
+                calendar_info = await self.get_calendar_info(calendar_identifier)
+                if not calendar_info:
+                    raise LumaAPINotFoundError(
+                        f"Calendar with slug '{calendar_identifier}' not found"
+                    )
+
+                calendar_api_id = calendar_info.get("api_id")
+                if not calendar_api_id:
+                    raise LumaAPIError(
+                        f"Could not get API ID for calendar slug '{calendar_identifier}'"
+                    )
+
+                log.info(
+                    f"Resolved calendar slug '{calendar_identifier}' to API ID '{calendar_api_id}'"
+                )
+            else:
+                calendar_api_id = calendar_identifier
+
             # Use the correct API endpoint for getting calendar data
             params = {"api_id": calendar_api_id, "limit": min(limit, 100)}  # API limit
 
@@ -298,7 +319,7 @@ class LumaAPIClient:
             return events[:limit]  # Ensure we don't exceed the requested limit
 
         except Exception as e:
-            log.error(f"Failed to fetch events for calendar {calendar_api_id}: {e}")
+            log.error(f"Failed to fetch events for calendar {calendar_identifier}: {e}")
             raise LumaAPIError(f"Failed to fetch events: {e}")
 
     async def get_calendar_info(self, calendar_slug: str) -> Optional[Dict[str, Any]]:
