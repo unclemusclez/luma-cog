@@ -1118,10 +1118,10 @@ class Luma(commands.Cog):
                                 if subscription_obj.api_id
                                 else "<https://luma.com>"
                             )
-                            event_title += f"\nfrom [*{event.subscription_name}*]({subscription_url})"
+                            event_title += f"\n*from [{event.subscription_name}]({subscription_url})*"
                         else:
                             # Fallback if subscription not found
-                            event_title += f"\nfrom {event.subscription_name}"
+                            event_title += f"\n*from {event.subscription_name}*"
 
                     # Event details
                     details = f"📅 {date_str}\n🕐 {time_display}"
