@@ -630,6 +630,7 @@ class Luma(commands.Cog):
                 name="Commands",
                 value="• `subscriptions` - Manage subscriptions\n"
                 "• `groups` - Manage channel groups\n"
+                "• `show` - Display upcoming events\n"
                 "• `config` - Configure update settings",
                 inline=False,
             )
@@ -1717,7 +1718,7 @@ class Luma(commands.Cog):
 
     @luma_group.command(name="events")
     @commands.guild_only()
-    async def show_events(self, ctx: commands.Context):
+    async def events(self, ctx: commands.Context):
         """
         Display upcoming events with improved formatting and actual URLs.
 
@@ -1946,28 +1947,27 @@ class Luma(commands.Cog):
             await ctx.send(embed=embed)
 
         except Exception as e:
-            log.error(f"Error in show_events command: {e}")
+            log.error(f"Error in events command: {e}")
             await ctx.send(f"❌ Failed to fetch events: {str(e)}")
 
-    @luma_group.group(name="events", aliases=["event"])
-    async def events_group(self, ctx: commands.Context):
-        """Event-related commands for managing event database and viewing events."""
+    @luma_group.group(name="database")
+    async def database_group(self, ctx: commands.Context):
+        """Database management commands for tracking events and viewing statistics."""
         if ctx.invoked_subcommand is None:
             embed = discord.Embed(
-                title="Event Commands",
-                description="Manage event database and view events",
+                title="Database Commands",
+                description="Manage event tracking database and view statistics",
                 color=discord.Color.blue(),
             )
             embed.add_field(
                 name="Commands",
                 value="• `clear` - Clear event tracking database\n"
-                "• `show` - Display upcoming events\n"
                 "• `stats` - Show database statistics",
                 inline=False,
             )
             await ctx.send(embed=embed)
 
-    @events_group.command(name="clear", aliases=["reset"])
+    @database_group.command(name="clear", aliases=["reset"])
     @checks.admin_or_permissions(manage_guild=True)
     async def clear_events_database(self, ctx: commands.Context):
         """Clear the event tracking database to enable resending notifications.
@@ -1983,7 +1983,7 @@ class Luma(commands.Cog):
         for events that were previously sent.
 
         Example:
-        `[p]luma events clear` - Clear event tracking database
+        `[p]luma database clear` - Clear event tracking database
         """
         # Get current database stats for confirmation
         try:
@@ -2076,30 +2076,7 @@ class Luma(commands.Cog):
             embed.color = discord.Color.orange()
             await message.edit(embed=embed)
 
-    @luma_group.command(name="database")
-    @checks.admin_or_permissions(manage_guild=True)
-    async def database_commands(self, ctx: commands.Context):
-        """Database management commands."""
-        # Delegate to the events clear command
-        await ctx.invoke(self.clear_events_database)
-
-    @events_group.command(name="show")
-    async def show_events_wrapper(self, ctx: commands.Context):
-        """Display upcoming events with improved formatting and actual URLs.
-
-        Shows events from all subscriptions with:
-        - Human-readable date/time formatting
-        - Actual event URLs instead of just slugs
-        - Event type and timezone information
-        - Better overall formatting
-
-        Example:
-        `[p]luma events show` - Show upcoming events with detailed formatting
-        """
-        # Call the existing show_events method
-        await self.show_events(ctx)
-
-    @events_group.command(name="stats")
+    @database_group.command(name="stats")
     @checks.admin_or_permissions(manage_guild=True)
     async def event_database_stats(self, ctx: commands.Context):
         """Show event database statistics and tracking information.
@@ -2111,7 +2088,7 @@ class Luma(commands.Cog):
         • Per-calendar event counts
 
         Example:
-        `[p]luma events stats` - View database statistics
+        `[p]luma database stats` - View database statistics
         """
         try:
             stats = await self.event_db.get_calendar_stats()
@@ -2167,7 +2144,7 @@ class Luma(commands.Cog):
                 value="• **Events:** Unique events stored in database\n"
                 "• **Calendars:** Different calendars being monitored\n"
                 "• **Messages:** Total notifications sent to channels\n\n"
-                "Use `[p]luma events clear` to reset tracking data.",
+                "Use `[p]luma database clear` to reset tracking data.",
                 inline=False,
             )
 
