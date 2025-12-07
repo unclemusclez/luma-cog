@@ -761,7 +761,17 @@ class Luma(commands.Cog):
 
     @luma_group.group(name="groups")
     async def groups_group(self, ctx: commands.Context):
-        """Manage channel groups for displaying events."""
+        """Manage channel groups for displaying events.
+
+        This command group allows you to create, configure, and delete channel groups
+        for organizing event displays across your Discord server.
+
+        Examples:
+        - `[p]luma groups` - View all current channel groups
+        - `[p]luma groups create "Weekly Events" #general 15` - Create a new group
+        - `[p]luma groups delete "Weekly Events"` - Delete a group
+        - `[p]luma groups addsub "Weekly Events" calendar_api_id` - Add subscription to group
+        """
         if ctx.invoked_subcommand is None:
             channel_groups = await self.config.guild(ctx.guild).channel_groups()
             if not channel_groups:
@@ -941,6 +951,99 @@ class Luma(commands.Cog):
             color=discord.Color.red(),
         )
         await ctx.send(embed=embed)
+
+    @groups_group.command(name="delete", aliases=["remove", "del"])
+    @checks.admin_or_permissions(manage_guild=True)
+    async def delete_group(self, ctx: commands.Context, *, group_name: str):
+        """Delete a channel group.
+
+        This will permanently remove a channel group and all its configuration.
+        The group will no longer receive event updates.
+
+        Parameters:
+        - group_name: Name of the group to delete
+
+        Examples:
+        - `[p]luma groups delete "Weekly Events"` - Delete the "Weekly Events" group
+        - `[p]luma groups remove "Weekly Events"` - Alternative alias
+        """
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        group = ChannelGroup.from_dict(channel_groups[group_name])
+        channel = ctx.guild.get_channel(group.channel_id)
+        channel_name = (
+            f"#{channel.name}" if channel else f"Unknown Channel ({group.channel_id})"
+        )
+
+        # Show confirmation dialog
+        embed = discord.Embed(
+            title="⚠️ Delete Channel Group",
+            description=f"This will permanently delete the channel group **{group_name}** including:\n"
+            f"• All group configuration\n"
+            f"• All subscription associations\n"
+            f"• Event display settings\n\n"
+            f"**Channel:** {channel_name}\n"
+            f"**Subscriptions:** {len(group.subscription_ids)}\n"
+            f"**Max Events:** {group.max_events}\n\n"
+            "**This action cannot be undone.**",
+            color=discord.Color.red(),
+        )
+        embed.add_field(
+            name="Confirmation Required",
+            value="React with ✅ to confirm or ❌ to cancel.",
+            inline=False,
+        )
+
+        message = await ctx.send(embed=embed)
+        await message.add_reaction("✅")
+        await message.add_reaction("❌")
+
+        def check(reaction, user):
+            return (
+                user == ctx.author
+                and reaction.message.id == message.id
+                and reaction.emoji in ["✅", "❌"]
+            )
+
+        try:
+            reaction, user = await self.bot.wait_for(
+                "reaction_add", timeout=60.0, check=check
+            )
+
+            if reaction.emoji == "✅":
+                # Remove the group from configuration
+                del channel_groups[group_name]
+                await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+                embed.title = "✅ Group Deleted"
+                embed.description = (
+                    f"Channel group **{group_name}** has been permanently deleted."
+                )
+                embed.color = discord.Color.green()
+                await message.edit(embed=embed)
+
+                log.info(
+                    f"User {ctx.author.id} deleted channel group '{group_name}' "
+                    f"from guild {ctx.guild.id}"
+                )
+
+            else:
+                embed.title = "❌ Deletion Cancelled"
+                embed.description = (
+                    "Group deletion was cancelled. No changes were made."
+                )
+                embed.color = discord.Color.blue()
+                await message.edit(embed=embed)
+
+        except asyncio.TimeoutError:
+            embed.title = "⏰ Deletion Cancelled"
+            embed.description = "Confirmation timed out. No changes were made."
+            embed.color = discord.Color.orange()
+            await message.edit(embed=embed)
 
     @luma_group.group(name="config")
     @checks.admin_or_permissions(manage_guild=True)
