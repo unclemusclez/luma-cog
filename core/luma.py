@@ -373,7 +373,7 @@ class Luma(commands.Cog):
 
                 description += f"**{event.name}**\n"
                 description += f"🕐 {time_str}\n"
-                description += f"🔗 [View Event]<https://luma.com/{event.url}>\n\n"
+                description += f"🔗 https://luma.com/{event.url}\n\n"
 
             embed.description = description
 
@@ -1070,7 +1070,7 @@ class Luma(commands.Cog):
 
                     # Add actual URL instead of just slug
                     if event.url:
-                        details += f"\n🔗 <{event.url}>"
+                        details += f"\n🔗 [View Event]<https://luma.com/{event.url}>"
 
                     embed.add_field(
                         name=event_title,
