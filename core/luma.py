@@ -352,12 +352,14 @@ class Luma(commands.Cog):
             # For automatic updates, return the new events (not all filtered events)
             events_to_return = deduplicated_new_events[: group.max_events]
 
-            # Use the actual count of new events that will be sent
-            new_events_count = len(events_to_return)
+            # FIX: Use the actual count of new events found (before deduplication)
+            # This ensures messages are sent when there are truly new events
+            new_events_count = total_new_events
 
             log.debug(
-                f"Final result: {new_events_count} new events will be sent "
-                f"(out of {len(all_new_events)} detected, "
+                f"Final result: {new_events_count} actual new events detected "
+                f"(displaying {len(events_to_return)} deduplicated events, "
+                f"out of {len(all_new_events)} detected, "
                 f"limited to {group.max_events} max per group)"
             )
         else:
