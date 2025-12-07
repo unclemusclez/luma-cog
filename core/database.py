@@ -445,12 +445,17 @@ class EventDatabase:
                 log.error(f"Failed to cleanup old history: {e}")
                 return 0
 
-    async def clear_event_database(self) -> Dict[str, Any]:
-        """Clear all event tracking data from the database.
+    async def clear_event_database(
+        self, calendar_api_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Clear event tracking data from the database.
 
-        This method clears all events and event history data while preserving
-        the database structure. This is useful for testing or when you want to
-        resend notifications for existing events.
+        This method clears events and event history data while preserving
+        the database structure. Can clear all data or just specific calendars.
+
+        Args:
+            calendar_api_ids: Optional list of calendar API IDs to clear.
+                            If None, clears all event data.
 
         Returns:
             Dict with counts of cleared records and success status
@@ -460,28 +465,90 @@ class EventDatabase:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
 
-                    # Get counts before clearing
-                    cursor.execute("SELECT COUNT(*) FROM events")
-                    events_count = cursor.fetchone()[0]
+                    if calendar_api_ids is None:
+                        # Clear all event data (global clear)
+                        log.info("Starting global event database clear")
 
-                    cursor.execute("SELECT COUNT(*) FROM event_history")
-                    history_count = cursor.fetchone()[0]
+                        # Get counts before clearing
+                        cursor.execute("SELECT COUNT(*) FROM events")
+                        events_count = cursor.fetchone()[0]
 
-                    # Clear all event data (preserves database structure)
-                    cursor.execute("DELETE FROM events")
-                    cursor.execute("DELETE FROM event_history")
+                        cursor.execute("SELECT COUNT(*) FROM event_history")
+                        history_count = cursor.fetchone()[0]
 
-                    conn.commit()
+                        # Clear all event data (preserves database structure)
+                        cursor.execute("DELETE FROM events")
+                        cursor.execute("DELETE FROM event_history")
 
-                    log.info(
-                        f"Event database cleared: {events_count} events, {history_count} history records"
-                    )
+                        conn.commit()
 
-                    return {
-                        "events_cleared": events_count,
-                        "history_cleared": history_count,
-                        "success": True,
-                    }
+                        log.info(
+                            f"Global event database cleared: {events_count} events, {history_count} history records"
+                        )
+
+                        return {
+                            "events_cleared": events_count,
+                            "history_cleared": history_count,
+                            "success": True,
+                            "type": "global",
+                        }
+                    else:
+                        # Clear specific calendar(s) only
+                        log.info(
+                            f"Starting group-specific database clear for calendars: {calendar_api_ids}"
+                        )
+
+                        # Build placeholders for the IN clause
+                        placeholders = ",".join(["?" for _ in calendar_api_ids])
+
+                        # Get counts before clearing
+                        cursor.execute(
+                            f"SELECT COUNT(*) FROM events WHERE calendar_api_id IN ({placeholders})",
+                            calendar_api_ids,
+                        )
+                        events_count = cursor.fetchone()[0]
+
+                        # Get history records that would be affected
+                        cursor.execute(
+                            """SELECT COUNT(*) FROM event_history eh
+                               JOIN events e ON eh.event_api_id = e.event_api_id
+                               WHERE e.calendar_api_id IN ({})""".format(
+                                placeholders
+                            ),
+                            calendar_api_ids,
+                        )
+                        history_count = cursor.fetchone()[0]
+
+                        # Clear event data for specific calendars
+                        cursor.execute(
+                            f"DELETE FROM events WHERE calendar_api_id IN ({placeholders})",
+                            calendar_api_ids,
+                        )
+
+                        # Clear history records for events from these calendars
+                        cursor.execute(
+                            """DELETE FROM event_history
+                               WHERE event_api_id IN (
+                                   SELECT event_api_id FROM events WHERE calendar_api_id IN ({})
+                               )""".format(
+                                placeholders
+                            ),
+                            calendar_api_ids,
+                        )
+
+                        conn.commit()
+
+                        log.info(
+                            f"Group-specific database clear completed: {events_count} events, {history_count} history records for calendars {calendar_api_ids}"
+                        )
+
+                        return {
+                            "events_cleared": events_count,
+                            "history_cleared": history_count,
+                            "success": True,
+                            "type": "group_specific",
+                            "calendars_cleared": calendar_api_ids,
+                        }
 
             except Exception as e:
                 log.error(f"Failed to clear event database: {e}")
@@ -490,4 +557,33 @@ class EventDatabase:
                     "history_cleared": 0,
                     "success": False,
                     "error": str(e),
+                    "type": calendar_api_ids and "group_specific" or "global",
                 }
+
+    async def get_calendars_for_group(
+        self, group_name: str, guild_channel_groups: Dict
+    ) -> List[str]:
+        """Get calendar API IDs for a specific group.
+
+        Args:
+            group_name: Name of the channel group
+            guild_channel_groups: Dictionary of guild channel groups
+
+        Returns:
+            List of calendar API IDs for the group, or empty list if group not found
+        """
+        if group_name not in guild_channel_groups:
+            log.warning(f"Group '{group_name}' not found in guild configuration")
+            return []
+
+        try:
+            from ..models.data_models import ChannelGroup
+
+            group = ChannelGroup.from_dict(guild_channel_groups[group_name])
+            log.debug(
+                f"Found group '{group_name}' with {len(group.subscription_ids)} subscriptions"
+            )
+            return group.subscription_ids
+        except Exception as e:
+            log.error(f"Failed to get calendars for group '{group_name}': {e}")
+            return []
