@@ -1594,11 +1594,14 @@ class Luma(commands.Cog):
 
     @luma_group.command(name="update")
     @checks.admin_or_permissions(manage_guild=True)
-    async def manual_update(self, ctx: commands.Context):
+    async def manual_update(self, ctx: commands.Context, force: bool = False):
         """Manually trigger an event update for this guild.
 
         This sends individual new event messages to configured channels,
         mimicking the automatic update behavior but triggered on-demand.
+
+        Parameters:
+        - force: If True, sends ALL recent events regardless of new status (useful for testing)
         """
         embed = discord.Embed(
             title="Manual Update",
@@ -1608,33 +1611,65 @@ class Luma(commands.Cog):
         message = await ctx.send(embed=embed)
 
         try:
-            # Use check_for_changes=True to detect and send only NEW events
+            # Determine check_for_changes based on force parameter
+            check_for_changes = not force
+
+            if force:
+                embed.description = (
+                    "🔄 Force mode: Sending ALL recent events to channels..."
+                )
+            else:
+                embed.description = "🔄 Checking for new events..."
+            await message.edit(embed=embed)
+
             subscriptions = await self.config.guild(ctx.guild).subscriptions()
             channel_groups = await self.config.guild(ctx.guild).channel_groups()
 
-            total_new_events = 0
+            total_events_sent = 0
 
             for group_name, group_data in channel_groups.items():
                 group = ChannelGroup.from_dict(group_data)
                 result = await self.fetch_events_for_group(
-                    group, subscriptions, check_for_changes=True
+                    group, subscriptions, check_for_changes=check_for_changes
                 )
 
-                # Send individual messages for new events
-                if result["events"] and result["new_events_count"] > 0:
-                    log.info(
-                        f"Manual update: Sending {result['new_events_count']} new events to group '{group_name}'"
-                    )
-                    await self.send_events_to_channel(
-                        group.channel_id, result["events"], ctx.guild, group_name
-                    )
-                    total_new_events += result["new_events_count"]
+                # Send events - in force mode, send all events regardless of new status
+                if result["events"]:
+                    if force:
+                        log.info(
+                            f"Force mode: Sending {len(result['events'])} events to group '{group_name}' (all events)"
+                        )
+                        await self.send_events_to_channel(
+                            group.channel_id, result["events"], ctx.guild, group_name
+                        )
+                        total_events_sent += len(result["events"])
+                    else:
+                        # Normal mode: only send if there are new events
+                        if result["new_events_count"] > 0:
+                            log.info(
+                                f"Manual update: Sending {result['new_events_count']} new events to group '{group_name}'"
+                            )
+                            await self.send_events_to_channel(
+                                group.channel_id,
+                                result["events"],
+                                ctx.guild,
+                                group_name,
+                            )
+                            total_events_sent += result["new_events_count"]
 
-            if total_new_events > 0:
-                embed.description = f"✅ Found and sent **{total_new_events}** new event(s) to channels!"
+            if total_events_sent > 0:
+                if force:
+                    embed.description = f"✅ Force mode: Sent **{total_events_sent}** event(s) to channels!"
+                else:
+                    embed.description = f"✅ Found and sent **{total_events_sent}** new event(s) to channels!"
                 embed.color = discord.Color.green()
             else:
-                embed.description = "✅ Update complete. No new events detected."
+                if force:
+                    embed.description = (
+                        "✅ Force mode complete. No events found to send."
+                    )
+                else:
+                    embed.description = "✅ Update complete. No new events detected."
                 embed.color = discord.Color.green()
 
             await message.edit(embed=embed)
