@@ -882,12 +882,241 @@ class Luma(commands.Cog):
 
         await ctx.send(embed=embed)
 
+    @groups_group.group(name="edit", invoke_without_command=False)
+    @checks.admin_or_permissions(manage_guild=True)
+    async def edit_group(self, ctx: commands.Context):
+        """Edit properties of a channel group.
+
+        Subcommands:
+        - name: Change the group name
+        - channel: Change the target channel
+        - max: Change maximum number of events
+        - timezone: Change the group timezone
+
+        Examples:
+        - `[p]luma groups edit "Weekly Events" name "New Name"`
+        - `[p]luma groups edit "Weekly Events" channel #new-channel`
+        - `[p]luma groups edit "Weekly Events" max 15`
+        - `[p]luma groups edit "Weekly Events" timezone "America/New_York"`
+        """
+        if ctx.invoked_subcommand is None:
+            embed = discord.Embed(
+                title="Edit Group Subcommands",
+                description="Available subcommands for editing groups:",
+                color=discord.Color.blue(),
+            )
+            embed.add_field(
+                name="name",
+                value='Change the group name\n`[p]luma groups edit "Group Name" name "New Name"`',
+                inline=False,
+            )
+            embed.add_field(
+                name="channel",
+                value='Change the target channel\n`[p]luma groups edit "Group Name" channel #new-channel`',
+                inline=False,
+            )
+            embed.add_field(
+                name="max",
+                value='Change maximum number of events\n`[p]luma groups edit "Group Name" max 15`',
+                inline=False,
+            )
+            embed.add_field(
+                name="timezone",
+                value='Change the group timezone\n`[p]luma groups edit "Group Name" timezone "America/New_York"`',
+                inline=False,
+            )
+            await ctx.send(embed=embed)
+
+    @edit_group.command(name="name")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def edit_group_name(
+        self, ctx: commands.Context, group_name: str, new_name: str
+    ):
+        """Change the name of a channel group.
+
+        Parameters:
+        - group_name: Current name of the group to edit
+        - new_name: New name for the group
+
+        Example:
+        `[p]luma groups edit "Weekly Events" name "New Events Channel"`
+        """
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        if new_name in channel_groups:
+            await ctx.send(f"A channel group named `{new_name}` already exists.")
+            return
+
+        # Get the group data and update the name
+        group_data = channel_groups[group_name]
+        group = ChannelGroup.from_dict(group_data)
+
+        # Update the group name
+        group.name = new_name
+        channel_groups[new_name] = group.to_dict()
+        del channel_groups[group_name]
+
+        await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+        embed = discord.Embed(
+            title="Group Name Updated",
+            description=f"Renamed group from **{group_name}** to **{new_name}**",
+            color=discord.Color.green(),
+        )
+        await ctx.send(embed=embed)
+
+    @edit_group.command(name="channel")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def edit_group_channel(
+        self, ctx: commands.Context, group_name: str, channel: discord.TextChannel
+    ):
+        """Change the target channel for a channel group.
+
+        Parameters:
+        - group_name: Name of the group to edit
+        - channel: New Discord channel to display events in
+
+        Example:
+        `[p]luma groups edit "Weekly Events" channel #events-channel`
+        """
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        group = ChannelGroup.from_dict(channel_groups[group_name])
+        old_channel = ctx.guild.get_channel(group.channel_id)
+        old_channel_name = (
+            f"#{old_channel.name}"
+            if old_channel
+            else f"Unknown Channel ({group.channel_id})"
+        )
+
+        # Update the channel
+        group.channel_id = channel.id
+        channel_groups[group_name] = group.to_dict()
+        await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+        embed = discord.Embed(
+            title="Group Channel Updated",
+            description=f"Updated channel for group **{group_name}**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Old Channel", value=old_channel_name, inline=True)
+        embed.add_field(name="New Channel", value=channel.mention, inline=True)
+        await ctx.send(embed=embed)
+
+    @edit_group.command(name="max")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def edit_group_max(
+        self, ctx: commands.Context, group_name: str, max_events: int
+    ):
+        """Change the maximum number of events for a channel group.
+
+        Parameters:
+        - group_name: Name of the group to edit
+        - max_events: New maximum number of events to display (1-50)
+
+        Example:
+        `[p]luma groups edit "Weekly Events" max 15`
+        """
+        if not 1 <= max_events <= 50:
+            await ctx.send("Maximum events must be between 1 and 50.")
+            return
+
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        group = ChannelGroup.from_dict(channel_groups[group_name])
+        old_max = group.max_events
+
+        # Update the max events
+        group.max_events = max_events
+        channel_groups[group_name] = group.to_dict()
+        await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+        embed = discord.Embed(
+            title="Group Max Events Updated",
+            description=f"Updated max events for group **{group_name}**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Old Max", value=str(old_max), inline=True)
+        embed.add_field(name="New Max", value=str(max_events), inline=True)
+        await ctx.send(embed=embed)
+
+    @edit_group.command(name="timezone", aliases=["tz"])
+    @checks.admin_or_permissions(manage_guild=True)
+    async def edit_group_timezone(
+        self, ctx: commands.Context, group_name: str, timezone: str
+    ):
+        """Change the timezone for a channel group.
+
+        Parameters:
+        - group_name: Name of the group to edit
+        - timezone: New timezone (e.g., 'America/New_York', 'UTC')
+
+        Example:
+        `[p]luma groups edit "Weekly Events" timezone "America/New_York"`
+        """
+        channel_groups = await self.config.guild(ctx.guild).channel_groups()
+
+        if group_name not in channel_groups:
+            await ctx.send(f"No channel group found named `{group_name}`.")
+            return
+
+        # Validate timezone
+        try:
+            pytz.timezone(timezone)
+        except:
+            await ctx.send(
+                f"Invalid timezone '{timezone}'. Please use a valid timezone like 'America/New_York' or 'UTC'."
+            )
+            return
+
+        group = ChannelGroup.from_dict(channel_groups[group_name])
+        old_timezone = group.timezone or "Default (from event)"
+
+        # Update the timezone
+        group.timezone = timezone
+        channel_groups[group_name] = group.to_dict()
+        await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
+
+        embed = discord.Embed(
+            title="Group Timezone Updated",
+            description=f"Updated timezone for group **{group_name}**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Old Timezone", value=old_timezone, inline=True)
+        embed.add_field(name="New Timezone", value=timezone, inline=True)
+        await ctx.send(embed=embed)
+
     @groups_group.command(name="addsub", aliases=["addsubscription"])
     @checks.admin_or_permissions(manage_guild=True)
     async def add_subscription_to_group(
-        self, ctx: commands.Context, group_name: str, subscription_api_id: str
+        self, ctx: commands.Context, group_name: str, subscription_identifier: str
     ):
-        """Add a subscription to a channel group."""
+        """Add a subscription to a channel group using either API ID or calendar slug.
+
+        Parameters:
+        - group_name: Name of the group to add the subscription to
+        - subscription_identifier: Either the API ID (e.g., 'cal-r8BcsXhhHYmA3tp')
+          or calendar slug (e.g., 'genai-ny') of the subscription
+
+        This command now accepts both API IDs and calendar slugs for flexibility.
+        If you provide a calendar slug, it will automatically resolve to the API ID.
+
+        Examples:
+        - `[p]luma groups addsub "Weekly Events" genai-ny` (by slug)
+        - `[p]luma groups addsub "Weekly Events" cal-r8BcsXhhHYmA3tp` (by API ID)
+        """
         channel_groups = await self.config.guild(ctx.guild).channel_groups()
         subscriptions = await self.config.guild(ctx.guild).subscriptions()
 
@@ -895,31 +1124,138 @@ class Luma(commands.Cog):
             await ctx.send(f"No channel group found named `{group_name}`.")
             return
 
-        if subscription_api_id not in subscriptions:
-            await ctx.send(
-                f"No subscription found with API ID `{subscription_api_id}`."
-            )
-            return
-
         group = ChannelGroup.from_dict(channel_groups[group_name])
-        subscription = Subscription.from_dict(subscriptions[subscription_api_id])
 
+        # Check if identifier is already a known API ID
+        subscription_api_id = None
+        if subscription_identifier in subscriptions:
+            subscription_api_id = subscription_identifier
+        else:
+            # Try to resolve slug to API ID
+            try:
+                async with LumaAPIClient() as client:
+                    calendar_info = await client.get_calendar_info(
+                        subscription_identifier
+                    )
+
+                if not calendar_info:
+                    await ctx.send(
+                        f"No calendar found with slug `{subscription_identifier}`. "
+                        f"Please check the slug is correct and try again."
+                    )
+                    return
+
+                subscription_api_id = calendar_info.get("api_id")
+                if not subscription_api_id:
+                    await ctx.send(
+                        f"Could not resolve slug `{subscription_identifier}` to an API ID."
+                    )
+                    return
+
+                # Check if this calendar is already subscribed
+                if subscription_api_id not in subscriptions:
+                    # Auto-add the subscription if not already present
+                    subscription = Subscription(
+                        api_id=subscription_api_id,
+                        slug=calendar_info.get("slug", subscription_identifier),
+                        name=calendar_info.get("name", "Unknown Calendar"),
+                        added_by=ctx.author.id,
+                        added_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    subscriptions[subscription_api_id] = subscription.to_dict()
+                    await self.config.guild(ctx.guild).subscriptions.set(subscriptions)
+
+                    log.info(
+                        f"Auto-added subscription for calendar '{subscription.name}' "
+                        f"(slug: {subscription_identifier}) while adding to group '{group_name}'"
+                    )
+
+                    embed = discord.Embed(
+                        title="Subscription Auto-Added",
+                        description=f"Auto-added and added **{subscription.name}** to group **{group_name}**",
+                        color=discord.Color.green(),
+                    )
+                    embed.add_field(
+                        name="Slug", value=f"`{subscription_identifier}`", inline=True
+                    )
+                    embed.add_field(
+                        name="API ID", value=f"`{subscription_api_id}`", inline=True
+                    )
+                    embed.add_field(
+                        name="Name", value=f"`{subscription.name}`", inline=True
+                    )
+                    await ctx.send(embed=embed)
+                else:
+                    # Subscription exists, just add to group
+                    subscription = Subscription.from_dict(
+                        subscriptions[subscription_api_id]
+                    )
+                    embed = discord.Embed(
+                        title="Subscription Added to Group",
+                        description=f"Added **{subscription.name}** to group **{group_name}**",
+                        color=discord.Color.green(),
+                    )
+                    embed.add_field(
+                        name="Slug", value=f"`{subscription_identifier}`", inline=True
+                    )
+                    embed.add_field(
+                        name="Resolved API ID",
+                        value=f"`{subscription_api_id}`",
+                        inline=True,
+                    )
+                    await ctx.send(embed=embed)
+
+            except LumaAPINotFoundError:
+                await ctx.send(
+                    f"Calendar with slug `{subscription_identifier}` was not found. "
+                    f"Please verify the slug is correct."
+                )
+                return
+            except LumaAPIRateLimitError:
+                await ctx.send(
+                    "API rate limit exceeded. Please wait a moment and try again."
+                )
+                return
+            except LumaAPIError as e:
+                await ctx.send(
+                    f"Failed to resolve calendar slug `{subscription_identifier}`: {str(e)}"
+                )
+                return
+            except Exception as e:
+                log.error(f"Unexpected error resolving calendar slug: {e}")
+                await ctx.send(
+                    f"An unexpected error occurred while resolving the calendar slug."
+                )
+                return
+
+        # At this point, we have a valid subscription_api_id
         if subscription_api_id in group.subscription_ids:
+            subscription = Subscription.from_dict(subscriptions[subscription_api_id])
             await ctx.send(
                 f"Subscription `{subscription.name}` is already in group `{group_name}`."
             )
             return
 
+        # Add the subscription to the group
         group.subscription_ids.append(subscription_api_id)
         channel_groups[group_name] = group.to_dict()
         await self.config.guild(ctx.guild).channel_groups.set(channel_groups)
 
-        embed = discord.Embed(
-            title="Subscription Added to Group",
-            description=f"Added **{subscription.name}** to group **{group_name}**",
-            color=discord.Color.green(),
-        )
-        await ctx.send(embed=embed)
+        if subscription_identifier not in subscriptions:
+            # This case handles when we already resolved a slug to API ID
+            subscription = Subscription.from_dict(subscriptions[subscription_api_id])
+            embed = discord.Embed(
+                title="Subscription Added to Group",
+                description=f"Added **{subscription.name}** to group **{group_name}**",
+                color=discord.Color.green(),
+            )
+            embed.add_field(
+                name="Identifier", value=f"`{subscription_identifier}`", inline=True
+            )
+            embed.add_field(
+                name="API ID", value=f"`{subscription_api_id}`", inline=True
+            )
+            await ctx.send(embed=embed)
 
     @groups_group.command(name="removesub", aliases=["removesubscription"])
     @checks.admin_or_permissions(manage_guild=True)
