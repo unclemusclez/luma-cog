@@ -2,7 +2,7 @@ import sys
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 import discord
 from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
@@ -1594,14 +1594,18 @@ class Luma(commands.Cog):
 
     @luma_group.command(name="update")
     @checks.admin_or_permissions(manage_guild=True)
-    async def manual_update(self, ctx: commands.Context, force: bool = False):
+    async def manual_update(self, ctx: commands.Context, force: Optional[str] = None):
         """Manually trigger an event update for this guild.
 
         This sends individual new event messages to configured channels,
         mimicking the automatic update behavior but triggered on-demand.
 
+        Usage:
+        - `[p]luma update` - Check for new events only
+        - `[p]luma update force` - Send ALL recent events regardless of new status
+
         Parameters:
-        - force: If True, sends ALL recent events regardless of new status (useful for testing)
+        - force: Use 'force' to send all events (useful for testing)
         """
         embed = discord.Embed(
             title="Manual Update",
@@ -1611,10 +1615,18 @@ class Luma(commands.Cog):
         message = await ctx.send(embed=embed)
 
         try:
-            # Determine check_for_changes based on force parameter
-            check_for_changes = not force
+            # Determine if force mode is enabled
+            force_mode = force is not None and force.lower() in [
+                "force",
+                "true",
+                "1",
+                "yes",
+            ]
 
-            if force:
+            # Determine check_for_changes based on force parameter
+            check_for_changes = not force_mode
+
+            if force_mode:
                 embed.description = (
                     "🔄 Force mode: Sending ALL recent events to channels..."
                 )
@@ -1635,7 +1647,7 @@ class Luma(commands.Cog):
 
                 # Send events - in force mode, send all events regardless of new status
                 if result["events"]:
-                    if force:
+                    if force_mode:
                         log.info(
                             f"Force mode: Sending {len(result['events'])} events to group '{group_name}' (all events)"
                         )
@@ -1658,13 +1670,13 @@ class Luma(commands.Cog):
                             total_events_sent += result["new_events_count"]
 
             if total_events_sent > 0:
-                if force:
+                if force_mode:
                     embed.description = f"✅ Force mode: Sent **{total_events_sent}** event(s) to channels!"
                 else:
                     embed.description = f"✅ Found and sent **{total_events_sent}** new event(s) to channels!"
                 embed.color = discord.Color.green()
             else:
-                if force:
+                if force_mode:
                     embed.description = (
                         "✅ Force mode complete. No events found to send."
                     )
