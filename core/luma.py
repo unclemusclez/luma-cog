@@ -514,26 +514,27 @@ class Luma(commands.Cog):
             hasattr(event, "calendar")
             and event.calendar
             and hasattr(event.calendar, "slug")
+            and event.calendar.slug
         ):
             # Use the actual Calendar.slug from the API response
-            calendar_slug = event.calendar.slug
+            calendar_slug = event.calendar.slug.strip()
             calendar_name = getattr(
                 event.calendar,
                 "name",
                 subscription.name if subscription else "Calendar",
             )
-            subscription_url = (
-                f"https://lu.ma/{calendar_slug}" if calendar_slug else "https://lu.ma"
-            )
+            # Ensure calendar_name is not empty
+            if not calendar_name or not calendar_name.strip():
+                calendar_name = "Calendar"
+            subscription_url = f"https://lu.ma/{calendar_slug}"
             description += f"*from* [{calendar_name}](<{subscription_url}>)\n\n"
-        elif subscription:
+        elif subscription and subscription.slug:
             # Fallback to local subscription data if API data not available
-            subscription_url = (
-                f"https://lu.ma/{subscription.slug}"
-                if subscription.slug
-                else "https://lu.ma"
-            )
+            subscription_url = f"https://lu.ma/{subscription.slug}"
             description += f"*from* [{subscription.name}](<{subscription_url}>)\n\n"
+        elif subscription:
+            # Last resort fallback
+            description += f"*from {subscription.name}*\n\n"
 
         description += f"📅 **Date:** {date_str}\n"
 
@@ -1263,19 +1264,19 @@ class Luma(commands.Cog):
                         hasattr(event, "calendar")
                         and event.calendar
                         and hasattr(event.calendar, "slug")
+                        and event.calendar.slug
                     ):
                         # Use the actual Calendar.slug from the API response
-                        calendar_slug = event.calendar.slug
+                        calendar_slug = event.calendar.slug.strip()
                         calendar_name = getattr(
                             event.calendar,
                             "name",
                             getattr(event, "subscription_name", "Calendar"),
                         )
-                        subscription_url = (
-                            f"https://lu.ma/{calendar_slug}"
-                            if calendar_slug
-                            else "https://lu.ma"
-                        )
+                        # Ensure calendar_name is not empty
+                        if not calendar_name or not calendar_name.strip():
+                            calendar_name = "Calendar"
+                        subscription_url = f"https://lu.ma/{calendar_slug}"
                         event_title += (
                             f"\n*from* [{calendar_name}](<{subscription_url}>)"
                         )
@@ -1295,14 +1296,13 @@ class Luma(commands.Cog):
                                 subscription_obj = sub
                                 break
 
-                        if subscription_obj:
+                        if subscription_obj and subscription_obj.slug:
                             # Build URL first, then format for Discord using angle brackets
-                            subscription_url = (
-                                f"https://lu.ma/{subscription_obj.slug}"
-                                if subscription_obj.slug
-                                else "https://lu.ma"
-                            )
+                            subscription_url = f"https://lu.ma/{subscription_obj.slug}"
                             event_title += f"\n*from* [{event.subscription_name}](<{subscription_url}>)"
+                        elif subscription_obj:
+                            # Subscription exists but no slug
+                            event_title += f"\n*from {event.subscription_name}*"
                         else:
                             # Fallback if subscription not found
                             event_title += f"\n*from {event.subscription_name}*"

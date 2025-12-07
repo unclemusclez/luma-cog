@@ -262,8 +262,6 @@ class LumaAPIClient:
 
                 # Convert calendar info to Calendar object for access to slug
                 try:
-                    from ..models.calendar_get import Calendar
-
                     calendar_data = Calendar(**calendar_info)
                 except Exception as e:
                     log.warning(f"Failed to create Calendar object: {e}")
@@ -300,6 +298,13 @@ class LumaAPIClient:
                     # Extract events from featured_items with their hosts and calendar info
                     for featured_item in model.featured_items:
                         if hasattr(featured_item, "event") and featured_item.event:
+                            # Ensure we have calendar data, fallback to the calendar_data from API response
+                            event_calendar = getattr(
+                                featured_item, "calendar", calendar_data
+                            )
+                            if not event_calendar and calendar_data:
+                                event_calendar = calendar_data
+
                             # Create a wrapper that includes hosts and calendar information
                             event_with_hosts = type(
                                 "EventWithHosts",
@@ -307,9 +312,7 @@ class LumaAPIClient:
                                 {
                                     "event": featured_item.event,
                                     "hosts": getattr(featured_item, "hosts", []),
-                                    "calendar": getattr(
-                                        featured_item, "calendar", calendar_data
-                                    ),
+                                    "calendar": event_calendar,
                                     "__dict__": featured_item.event.__dict__,
                                     "__getattr__": lambda self, name: getattr(
                                         self.event, name
@@ -352,13 +355,24 @@ class LumaAPIClient:
                             # Wrap with hosts if available
                             event_id = event_data.get("api_id", "unknown")
                             if event_id in hosts_data:
+                                # Ensure we have calendar data, use the best available source
+                                event_calendar = calendar_data
+                                if not event_calendar and calendar_info_data:
+                                    try:
+                                        event_calendar = Calendar(**calendar_info_data)
+                                    except Exception as e:
+                                        log.warning(
+                                            f"Failed to create Calendar object from calendar_info_data: {e}"
+                                        )
+                                        event_calendar = None
+
                                 event_with_hosts = type(
                                     "EventWithHosts",
                                     (),
                                     {
                                         "event": event,
                                         "hosts": hosts_data[event_id],
-                                        "calendar": calendar_data,
+                                        "calendar": event_calendar,
                                         "__dict__": event.__dict__,
                                         "__getattr__": lambda self, name: getattr(
                                             self.event, name
@@ -367,7 +381,24 @@ class LumaAPIClient:
                                 )()
                                 events.append(event_with_hosts)
                             else:
-                                events.append(event)
+                                # Even without hosts, wrap with calendar data if available
+                                if calendar_data:
+                                    event_with_calendar = type(
+                                        "EventWithCalendar",
+                                        (),
+                                        {
+                                            "event": event,
+                                            "hosts": [],
+                                            "calendar": calendar_data,
+                                            "__dict__": event.__dict__,
+                                            "__getattr__": lambda self, name: getattr(
+                                                self.event, name
+                                            ),
+                                        },
+                                    )()
+                                    events.append(event_with_calendar)
+                                else:
+                                    events.append(event)
                         elif hasattr(event_data, "event"):  # If it's a featured_item
                             events.append(event_data.event)
                     except Exception as e:
