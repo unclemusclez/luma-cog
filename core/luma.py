@@ -209,7 +209,7 @@ class Luma(commands.Cog):
             new_filtered_events = [
                 e
                 for e in filtered_events
-                if any(e.api_id == new_event.get("api_id") for new_event in all_events)
+                if any(e.api_id == new_event.api_id for new_event in all_events)
             ]
             return {
                 "events": new_filtered_events[
