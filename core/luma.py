@@ -385,7 +385,7 @@ class Luma(commands.Cog):
                         break
 
                 if subscription:
-                    description += f"from [{subscription.name}](https://luma.com/{subscription.slug})\n"
+                    description += f"from *{subscription.name}*\n"
                 else:
                     # Fallback to API ID if subscription not found
                     description += f"from {event.calendar_api_id}\n"
@@ -1086,7 +1086,7 @@ class Luma(commands.Cog):
                                 break
 
                         if subscription_obj:
-                            event_title += f"\nfrom [{event.subscription_name}](https://luma.com/{subscription_obj.slug})"
+                            event_title += f"\nfrom *{event.subscription_name}*"
                         else:
                             # Fallback if subscription not found
                             event_title += f"\nfrom {event.subscription_name}"
