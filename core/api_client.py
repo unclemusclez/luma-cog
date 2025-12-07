@@ -484,6 +484,69 @@ class LumaAPIClient:
             log.error(f"Failed to get calendar info for {calendar_slug}: {e}")
             return None
 
+    async def get_calendar_metadata_by_api_id(
+        self, calendar_api_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get calendar metadata by API ID.
+
+        This method fetches calendar information using the API ID to get
+        the calendar's slug and name for auto-population of subscription data.
+
+        Args:
+            calendar_api_id: The API ID of the calendar
+
+        Returns:
+            Dictionary with calendar information including 'slug' and 'name',
+            or None if not found
+        """
+        try:
+            # Use the calendar/get endpoint with api_id parameter
+            params = {"api_id": calendar_api_id}
+            endpoint = "calendar/get"
+            response_data = await self._make_request_with_retry(endpoint, params)
+
+            # Extract calendar information from the response
+            if isinstance(response_data, dict) and "calendar" in response_data:
+                calendar_info = response_data["calendar"]
+
+                # Ensure we have the required fields
+                if "slug" in calendar_info and "name" in calendar_info:
+                    log.info(
+                        f"Successfully fetched metadata for calendar API ID {calendar_api_id}"
+                    )
+                    return {
+                        "slug": calendar_info["slug"],
+                        "name": calendar_info["name"],
+                        "api_id": calendar_api_id,  # Include the original API ID
+                        "url": calendar_info.get("url", ""),
+                        "description": calendar_info.get("description", ""),
+                    }
+                else:
+                    log.warning(
+                        f"Calendar info missing required fields (slug/name) for API ID {calendar_api_id}"
+                    )
+                    return None
+
+            log.warning(
+                f"No calendar data found in response for API ID {calendar_api_id}"
+            )
+            return None
+
+        except LumaAPINotFoundError:
+            log.warning(f"Calendar with API ID {calendar_api_id} not found")
+            return None
+        except LumaAPIRateLimitError:
+            log.warning(
+                f"Rate limit exceeded while fetching calendar metadata for API ID {calendar_api_id}"
+            )
+            return None
+        except Exception as e:
+            log.error(
+                f"Failed to get calendar metadata for API ID {calendar_api_id}: {e}"
+            )
+            return None
+
     def clear_cache(self) -> None:
         """Clear all cached responses."""
         self._cache.clear()

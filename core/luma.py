@@ -140,6 +140,7 @@ class Luma(commands.Cog):
 
     Features:
     - Add multiple Luma calendar subscriptions per server
+    - Auto-populate calendar slug and name from API
     - Create channel groups to organize event displays
     - Automatic background updates with configurable intervals
     - Manual testing and forced updates
@@ -148,7 +149,7 @@ class Luma(commands.Cog):
     Requires administrator permissions to configure.
 
     Example usage:
-    [p]luma subscriptions add calendar_api_id calendar_slug "My Events"
+    [p]luma subscriptions add calendar_api_id
     [p]luma groups create "Weekly Events" #general 15
     [p]luma groups addsub "Weekly Events" calendar_api_id
     [p]luma config interval 6
@@ -609,7 +610,7 @@ class Luma(commands.Cog):
 
         Examples:
         - `[p]luma subscriptions` - View all current subscriptions
-        - `[p]luma subscriptions add abc123 my-calendar "Team Events"` - Add a new subscription
+        - `[p]luma subscriptions add abc123` - Add a new subscription (auto-populates slug and name)
         - `[p]luma subscriptions remove abc123` - Remove a subscription
         """
         if ctx.invoked_subcommand is None:
@@ -636,15 +637,14 @@ class Luma(commands.Cog):
 
     @subscriptions_group.command(name="add")
     @checks.admin_or_permissions(manage_guild=True)
-    async def add_subscription(
-        self, ctx: commands.Context, api_id: str, slug: str, name: str
-    ):
+    async def add_subscription(self, ctx: commands.Context, api_id: str):
         """Add a new Luma calendar subscription.
 
         Parameters:
         - api_id: The API ID of the Luma calendar
-        - slug: The slug/URL identifier of the calendar
-        - name: A friendly name for this subscription
+
+        The command will automatically fetch the calendar's slug and name
+        from the Luma API to populate the subscription data.
         """
         subscriptions = await self.config.guild(ctx.guild).subscriptions()
 
@@ -652,26 +652,91 @@ class Luma(commands.Cog):
             await ctx.send(f"A subscription with API ID `{api_id}` already exists.")
             return
 
-        subscription = Subscription(
-            api_id=api_id,
-            slug=slug,
-            name=name,
-            added_by=ctx.author.id,
-            added_at=datetime.now(timezone.utc).isoformat(),
-        )
-
-        subscriptions[api_id] = subscription.to_dict()
-        await self.config.guild(ctx.guild).subscriptions.set(subscriptions)
-
+        # Send initial message to show progress
         embed = discord.Embed(
-            title="Subscription Added",
-            description=f"Successfully added subscription: **{name}**",
-            color=discord.Color.green(),
+            title="Adding Subscription",
+            description="🔄 Fetching calendar metadata...",
+            color=discord.Color.blue(),
         )
-        embed.add_field(name="API ID", value=f"`{api_id}`", inline=True)
-        embed.add_field(name="Slug", value=f"`{slug}`", inline=True)
+        message = await ctx.send(embed=embed)
 
-        await ctx.send(embed=embed)
+        try:
+            # Fetch calendar metadata from the API
+            async with LumaAPIClient() as client:
+                calendar_metadata = await client.get_calendar_metadata_by_api_id(api_id)
+
+                if not calendar_metadata:
+                    embed.title = "❌ Failed to Add Subscription"
+                    embed.description = (
+                        f"Could not fetch calendar metadata for API ID `{api_id}`. "
+                        "Please verify the API ID is correct and try again."
+                    )
+                    embed.color = discord.Color.red()
+                    await message.edit(embed=embed)
+                    return
+
+                # Extract metadata
+                slug = calendar_metadata["slug"]
+                name = calendar_metadata["name"]
+
+                # Create subscription with fetched data
+                subscription = Subscription(
+                    api_id=api_id,
+                    slug=slug,
+                    name=name,
+                    added_by=ctx.author.id,
+                    added_at=datetime.now(timezone.utc).isoformat(),
+                )
+
+                subscriptions[api_id] = subscription.to_dict()
+                await self.config.guild(ctx.guild).subscriptions.set(subscriptions)
+
+                # Update embed with success message
+                embed.title = "✅ Subscription Added"
+                embed.description = f"Successfully added subscription: **{name}**"
+                embed.color = discord.Color.green()
+                embed.add_field(name="API ID", value=f"`{api_id}`", inline=True)
+                embed.add_field(name="Slug", value=f"`{slug}`", inline=True)
+                embed.add_field(name="Name", value=f"`{name}`", inline=True)
+
+                await message.edit(embed=embed)
+
+                log.info(
+                    f"User {ctx.author.id} added subscription for calendar '{name}' "
+                    f"(API ID: {api_id}, Slug: {slug})"
+                )
+
+        except LumaAPIRateLimitError:
+            embed.title = "⏰ Rate Limited"
+            embed.description = (
+                "API rate limit exceeded. Please wait a moment and try again."
+            )
+            embed.color = discord.Color.orange()
+            await message.edit(embed=embed)
+
+        except LumaAPINotFoundError:
+            embed.title = "❌ Calendar Not Found"
+            embed.description = (
+                f"Calendar with API ID `{api_id}` was not found. "
+                "Please verify the API ID is correct."
+            )
+            embed.color = discord.Color.red()
+            await message.edit(embed=embed)
+
+        except LumaAPIError as e:
+            embed.title = "❌ API Error"
+            embed.description = f"Failed to fetch calendar metadata: {str(e)}"
+            embed.color = discord.Color.red()
+            await message.edit(embed=embed)
+
+        except Exception as e:
+            log.error(f"Unexpected error in add_subscription: {e}")
+            embed.title = "❌ Unexpected Error"
+            embed.description = (
+                "An unexpected error occurred while adding the subscription."
+            )
+            embed.color = discord.Color.red()
+            await message.edit(embed=embed)
 
     @subscriptions_group.command(name="remove", aliases=["delete", "del"])
     @checks.admin_or_permissions(manage_guild=True)
