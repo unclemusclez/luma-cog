@@ -228,14 +228,86 @@ class Luma(commands.Cog):
         await self.config.last_update.set(datetime.now(timezone.utc).isoformat())
 
     async def update_guild_events(self, guild: discord.Guild):
-        """Update events for a specific guild."""
+        """Update events for a specific guild with comprehensive debugging."""
         subscriptions = await self.config.guild(guild).subscriptions()
         channel_groups = await self.config.guild(guild).channel_groups()
 
+        # DEBUG: Log initial state
+        log.info(
+            f"[DEBUG] update_guild_events for guild {guild.id} ({guild.name}): "
+            f"{len(subscriptions)} subscriptions, {len(channel_groups)} channel groups"
+        )
+
+        # Check for missing configuration
+        if not subscriptions:
+            log.warning(
+                f"[DEBUG] Guild {guild.id} has no subscriptions configured. "
+                "Events cannot be fetched without subscriptions."
+            )
+            return
+
+        if not channel_groups:
+            log.warning(
+                f"[DEBUG] Guild {guild.id} has no channel groups configured. "
+                "Messages cannot be sent without channel groups."
+            )
+            return
+
+        messages_sent = 0
+
         for group_name, group_data in channel_groups.items():
             group = ChannelGroup.from_dict(group_data)
+
+            # DEBUG: Log group details
+            log.info(
+                f"[DEBUG] Processing group '{group_name}': "
+                f"channel_id={group.channel_id}, "
+                f"subscriptions={group.subscription_ids}, "
+                f"max_events={group.max_events}"
+            )
+
+            # Check if group has subscriptions
+            if not group.subscription_ids:
+                log.warning(
+                    f"[DEBUG] Group '{group_name}' has no subscriptions attached. "
+                    "Use '[p]luma groups addsub' to add subscriptions."
+                )
+                continue
+
+            # Verify subscriptions exist in guild config
+            valid_subs = [s for s in group.subscription_ids if s in subscriptions]
+            if not valid_subs:
+                log.warning(
+                    f"[DEBUG] Group '{group_name}' references subscriptions that don't exist: "
+                    f"{group.subscription_ids}. Available: {list(subscriptions.keys())}"
+                )
+                continue
+
+            # Check channel exists and permissions
+            channel = guild.get_channel(group.channel_id)
+            if not channel:
+                log.warning(
+                    f"[DEBUG] Channel {group.channel_id} for group '{group_name}' not found in guild"
+                )
+                continue
+
+            if not channel.permissions_for(guild.me).send_messages:
+                log.warning(
+                    f"[DEBUG] Bot lacks send_messages permission in channel #{channel.name} "
+                    f"for group '{group_name}'"
+                )
+                continue
+
             result = await self.fetch_events_for_group(
                 group, subscriptions, check_for_changes=True
+            )
+
+            # DEBUG: Log fetch results
+            log.info(
+                f"[DEBUG] Group '{group_name}' fetch result: "
+                f"events={len(result['events'])}, "
+                f"new_events_count={result['new_events_count']}, "
+                f"change_stats={result['change_stats']}"
             )
 
             # Only send message if there are new events
@@ -247,8 +319,18 @@ class Luma(commands.Cog):
                 await self.send_events_to_channel(
                     group.channel_id, result["events"], guild, group_name
                 )
+                messages_sent += len(result["events"])
             else:
-                log.debug(f"No new events for group '{group_name}', skipping update")
+                log.info(
+                    f"[DEBUG] No new events for group '{group_name}': "
+                    f"events_count={len(result['events'])}, "
+                    f"new_events_count={result['new_events_count']}"
+                )
+
+        log.info(
+            f"[DEBUG] update_guild_events complete for guild {guild.id}: "
+            f"Messages Sent: {messages_sent}"
+        )
 
     async def fetch_events_for_group(
         self, group: ChannelGroup, subscriptions: Dict, check_for_changes: bool = True
