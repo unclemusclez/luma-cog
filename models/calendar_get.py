@@ -181,7 +181,7 @@ class Host(BaseModel):
     bio_short: Optional[str]
     avatar_url: str
     is_verified: bool
-    tiktok_handle: None
+    tiktok_handle: Optional[str] = None
     last_online_at: Optional[str]
     twitter_handle: Optional[str]
     youtube_handle: Optional[str]

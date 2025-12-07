@@ -193,7 +193,7 @@ class EventDatabase:
                     # Get existing events for this calendar
                     cursor.execute(
                         """
-                        SELECT event_api_id, last_modified FROM events 
+                        SELECT event_api_id, last_modified FROM events
                         WHERE calendar_api_id = ?
                     """,
                         (calendar_api_id,),
@@ -204,42 +204,15 @@ class EventDatabase:
                     updated_events = 0
                     current_time = datetime.now(timezone.utc).isoformat()
 
-                    # Process incoming events
+                    # Process incoming events using UPSERT to handle duplicates
                     for event_data in events:
                         event_api_id = event_data["api_id"]
 
-                        if event_api_id in existing_events:
-                            # Check if event was modified
-                            if existing_events[event_api_id] != event_data.get(
-                                "last_modified", current_time
-                            ):
-                                # Update existing event
-                                cursor.execute(
-                                    """
-                                    UPDATE events SET
-                                        name = ?, start_at = ?, end_at = ?, timezone = ?,
-                                        event_type = ?, url = ?, last_modified = ?,
-                                        updated_at = ?
-                                    WHERE event_api_id = ?
-                                """,
-                                    (
-                                        event_data.get("name", ""),
-                                        event_data.get("start_at", ""),
-                                        event_data.get("end_at"),
-                                        event_data.get("timezone"),
-                                        event_data.get("event_type"),
-                                        event_data.get("url"),
-                                        event_data.get("last_modified", current_time),
-                                        current_time,
-                                        event_api_id,
-                                    ),
-                                )
-                                updated_events += 1
-                        else:
-                            # Insert new event
+                        try:
+                            # Use UPSERT (INSERT OR REPLACE) to handle duplicates
                             cursor.execute(
                                 """
-                                INSERT INTO events (
+                                INSERT OR REPLACE INTO events (
                                     event_api_id, calendar_api_id, name, start_at, end_at,
                                     timezone, event_type, url, last_modified, created_at, updated_at
                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -258,7 +231,16 @@ class EventDatabase:
                                     current_time,
                                 ),
                             )
-                            new_events += 1
+
+                            # Check if this was a new event or update
+                            if event_api_id in existing_events:
+                                updated_events += 1
+                            else:
+                                new_events += 1
+
+                        except Exception as e:
+                            log.warning(f"Failed to upsert event {event_api_id}: {e}")
+                            continue
 
                     # Find deleted events (events that existed before but not in current data)
                     current_event_ids = {event["api_id"] for event in events}

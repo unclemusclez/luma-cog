@@ -209,13 +209,7 @@ class Luma(commands.Cog):
             new_filtered_events = [
                 e
                 for e in filtered_events
-                if any(
-                    e.api_id == new_event["api_id"]
-                    for new_event in [
-                        event.to_dict() if hasattr(event, "to_dict") else event
-                        for event in all_events
-                    ]
-                )
+                if any(e.api_id == new_event.get("api_id") for new_event in all_events)
             ]
             return {
                 "events": new_filtered_events[
@@ -793,15 +787,15 @@ class Luma(commands.Cog):
         message = await ctx.send(embed=embed)
 
         try:
-            events = await self.fetch_events_from_subscription(subscription)
+            result = await self.fetch_events_from_subscription(subscription)
 
-            if events:
+            if result["events"]:
                 embed.title = "✅ Test Successful"
-                embed.description = f"Successfully fetched {len(events)} events from **{subscription.name}**"
+                embed.description = f"Successfully fetched {len(result['events'])} events from **{subscription.name}**"
                 embed.color = discord.Color.green()
 
                 # Show first few events
-                for i, event in enumerate(events[:3]):
+                for i, event in enumerate(result["events"][:3]):
                     start_time = datetime.fromisoformat(
                         event.start_at.replace("Z", "+00:00")
                     )
@@ -812,10 +806,10 @@ class Luma(commands.Cog):
                         inline=False,
                     )
 
-                if len(events) > 3:
+                if len(result["events"]) > 3:
                     embed.add_field(
                         name="And more...",
-                        value=f"{len(events) - 3} more events available",
+                        value=f"{len(result['events']) - 3} more events available",
                         inline=False,
                     )
             else:
@@ -1041,7 +1035,7 @@ class Luma(commands.Cog):
                     # Add location if available
                     if hasattr(event, "geo_address_info") and event.geo_address_info:
                         location = event.geo_address_info
-                        if location.city_state:
+                        if hasattr(location, "city_state") and location.city_state:
                             details += f"\n📍 {location.city_state}"
 
                     # Add actual URL instead of just slug
