@@ -277,10 +277,23 @@ class LumaAPIClient:
                 try:
                     model = Model(**response_data)
 
-                    # Extract events from featured_items
+                    # Extract events from featured_items with their hosts
                     for featured_item in model.featured_items:
                         if hasattr(featured_item, "event") and featured_item.event:
-                            events.append(featured_item.event)
+                            # Create a wrapper that includes hosts information
+                            event_with_hosts = type(
+                                "EventWithHosts",
+                                (),
+                                {
+                                    "event": featured_item.event,
+                                    "hosts": getattr(featured_item, "hosts", []),
+                                    "__dict__": featured_item.event.__dict__,
+                                    "__getattr__": lambda self, name: getattr(
+                                        self.event, name
+                                    ),
+                                },
+                            )()
+                            events.append(event_with_hosts)
 
                 except Exception as e:
                     log.error(f"Failed to parse Model response: {e}")
@@ -290,12 +303,18 @@ class LumaAPIClient:
             if not events and isinstance(response_data, dict):
                 # Look for events in various possible locations
                 events_data = []
+                hosts_data = {}
 
                 # Try featured_items first
                 if "featured_items" in response_data:
                     for item in response_data["featured_items"]:
                         if "event" in item:
                             events_data.append(item["event"])
+                            # Store associated hosts if available
+                            if "hosts" in item:
+                                hosts_data[item["event"].get("api_id", "unknown")] = (
+                                    item["hosts"]
+                                )
 
                 # Try events directly
                 if "events" in response_data:
@@ -306,7 +325,24 @@ class LumaAPIClient:
                     try:
                         if isinstance(event_data, dict):
                             event = Event(**event_data)
-                            events.append(event)
+                            # Wrap with hosts if available
+                            event_id = event_data.get("api_id", "unknown")
+                            if event_id in hosts_data:
+                                event_with_hosts = type(
+                                    "EventWithHosts",
+                                    (),
+                                    {
+                                        "event": event,
+                                        "hosts": hosts_data[event_id],
+                                        "__dict__": event.__dict__,
+                                        "__getattr__": lambda self, name: getattr(
+                                            self.event, name
+                                        ),
+                                    },
+                                )()
+                                events.append(event_with_hosts)
+                            else:
+                                events.append(event)
                         elif hasattr(event_data, "event"):  # If it's a featured_item
                             events.append(event_data.event)
                     except Exception as e:

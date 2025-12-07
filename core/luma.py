@@ -208,6 +208,8 @@ class Luma(commands.Cog):
         if check_for_changes:
             # Use the new events detected by the database, not all events
             all_new_events = []
+            actual_new_events_count = 0
+
             for sub_id in group.subscription_ids:
                 if sub_id in subscriptions:
                     subscription = Subscription.from_dict(subscriptions[sub_id])
@@ -216,6 +218,7 @@ class Luma(commands.Cog):
                             subscription, check_for_changes
                         )
                         all_new_events.extend(result["new_events"])
+                        actual_new_events_count += len(result["new_events"])
                     except Exception as e:
                         log.error(
                             f"Error getting new events for subscription {sub_id}: {e}"
@@ -233,13 +236,17 @@ class Luma(commands.Cog):
 
             # For automatic updates, return the new events (not all filtered events)
             events_to_return = new_filtered_events[: group.max_events]
+
+            # Use the actual count of new events that will be sent, not total count
+            new_events_count = len(events_to_return)
         else:
             # For manual updates, include all recent events
             events_to_return = filtered_events[: group.max_events]
+            new_events_count = total_new_events
 
         return {
             "events": events_to_return,
-            "new_events_count": total_new_events,
+            "new_events_count": new_events_count,
             "change_stats": change_stats,
         }
 
@@ -385,13 +392,32 @@ class Luma(commands.Cog):
                         break
 
                 if subscription:
-                    description += f"from *{subscription.name}*\n"
+                    # Use italics AND links format: [*text*](url)
+                    subscription_url = (
+                        f"https://luma.com/{subscription.slug}"
+                        if subscription.slug
+                        else "https://luma.com"
+                    )
+                    description += f"from [*{subscription.name}*]({subscription_url})\n"
                 else:
                     # Fallback to API ID if subscription not found
                     description += f"from {event.calendar_api_id}\n"
 
                 description += f"🕐 {time_str}\n"
-                description += f"🔗 [View Event](https://luma.com/{event.url})\n\n"
+
+                # Add hosts information if available
+                if hasattr(event, "hosts") and event.hosts:
+                    host_names = [
+                        host.name for host in event.hosts[:3]
+                    ]  # Limit to 3 hosts
+                    if len(host_names) == 1:
+                        description += f"👤 Host: {host_names[0]}\n"
+                    elif len(host_names) == 2:
+                        description += f"👥 Hosts: {host_names[0]} & {host_names[1]}\n"
+                    else:
+                        description += f"👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}\n"
+
+                description += f" [View Event](https://luma.com/{event.url})\n\n"
 
             embed.description = description
 
@@ -1086,7 +1112,13 @@ class Luma(commands.Cog):
                                 break
 
                         if subscription_obj:
-                            event_title += f"\nfrom *{event.subscription_name}*"
+                            # Use italics AND links format: [*text*](url)
+                            subscription_url = (
+                                f"https://luma.com/{subscription_obj.slug}"
+                                if subscription_obj.slug
+                                else "https://luma.com"
+                            )
+                            event_title += f"\nfrom [*{event.subscription_name}*]({subscription_url})"
                         else:
                             # Fallback if subscription not found
                             event_title += f"\nfrom {event.subscription_name}"
@@ -1109,6 +1141,30 @@ class Luma(commands.Cog):
                     # Add actual URL instead of just slug
                     if event.url:
                         details += f"\n🔗 [View Event](<https://luma.com/{event.url}>)"
+
+                    # Add hosts information if available
+                    if hasattr(event, "hosts") and event.hosts:
+                        host_names = [
+                            host.name for host in event.hosts[:3]
+                        ]  # Limit to 3 hosts
+                        if len(host_names) == 1:
+                            details += f"\n👤 Host: {host_names[0]}"
+                        elif len(host_names) == 2:
+                            details += f"\n👥 Hosts: {host_names[0]} & {host_names[1]}"
+                        else:
+                            details += f"\n👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}"
+
+                    # Add hosts information if available
+                    if hasattr(event, "hosts") and event.hosts:
+                        host_names = [
+                            host.name for host in event.hosts[:3]
+                        ]  # Limit to 3 hosts
+                        if len(host_names) == 1:
+                            details += f"\n👤 Host: {host_names[0]}"
+                        elif len(host_names) == 2:
+                            details += f"\n👥 Hosts: {host_names[0]} & {host_names[1]}"
+                        else:
+                            details += f"\n👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}"
 
                     embed.add_field(
                         name=event_title,
