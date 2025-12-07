@@ -630,7 +630,8 @@ class Luma(commands.Cog):
                 name="Commands",
                 value="• `subscriptions` - Manage subscriptions\n"
                 "• `groups` - Manage channel groups\n"
-                "• `show` - Display upcoming events\n"
+                "• `events` - Display upcoming events\n"
+                "• `schedule` - View update timing and schedule\n"
                 "• `config` - Configure update settings",
                 inline=False,
             )
@@ -1715,6 +1716,166 @@ class Luma(commands.Cog):
             embed.description = "Confirmation timed out. No changes were made."
             embed.color = discord.Color.orange()
             await message.edit(embed=embed)
+
+    @luma_group.command(name="schedule", aliases=["next"])
+    @commands.guild_only()
+    async def show_schedule(self, ctx: commands.Context):
+        """
+        Show when the next automatic event update will occur and scheduling information.
+
+        This command displays:
+        • Next automatic update time - When the background task will check for new events
+        • Current update interval - How often updates run (default 24 hours)
+        • Manual update option - How to trigger immediate updates
+        • Update status - When the last update occurred
+
+        Examples:
+        `[p]luma schedule` - View update schedule and timing information
+        `[p]luma next` - Quick view of next update time
+        """
+        # Get current configuration
+        global_config = await self.config.all()
+        guild_config = await self.config.guild(ctx.guild).all()
+        update_interval_hours = global_config["update_interval_hours"]
+        last_update_str = global_config["last_update"]
+        updates_enabled = guild_config["enabled"]
+
+        # Calculate next update time
+        now = datetime.now(timezone.utc)
+        next_update_time = None
+        time_until_next = None
+
+        if last_update_str:
+            try:
+                last_update = datetime.fromisoformat(
+                    last_update_str.replace("Z", "+00:00")
+                )
+                next_update_time = last_update + timedelta(hours=update_interval_hours)
+                time_until_next = next_update_time - now
+
+                # If the next update time has already passed, calculate the next one
+                if next_update_time <= now:
+                    # Calculate how many intervals have passed since last update
+                    intervals_passed = int(
+                        (now - last_update).total_seconds()
+                        / (update_interval_hours * 3600)
+                    )
+                    next_update_time = last_update + timedelta(
+                        hours=update_interval_hours * (intervals_passed + 1)
+                    )
+                    time_until_next = next_update_time - now
+            except Exception as e:
+                log.warning(f"Error calculating next update time: {e}")
+
+        # Format time until next update
+        if time_until_next:
+            if time_until_next.total_seconds() <= 0:
+                time_until_str = "Update is overdue - next update will happen soon"
+            else:
+                days = time_until_next.days
+                hours = time_until_next.seconds // 3600
+                minutes = (time_until_next.seconds % 3600) // 60
+
+                if days > 0:
+                    time_until_str = f"{days}d {hours}h {minutes}m"
+                elif hours > 0:
+                    time_until_str = f"{hours}h {minutes}m"
+                else:
+                    time_until_str = f"{minutes}m"
+        else:
+            time_until_str = "Unknown - no previous updates recorded"
+
+        # Format next update time
+        if next_update_time:
+            next_update_str = next_update_time.strftime("%Y-%m-%d %H:%M UTC")
+        else:
+            next_update_str = "Unknown - trigger first update manually"
+
+        # Format last update time
+        if last_update_str:
+            try:
+                last_update = datetime.fromisoformat(
+                    last_update_str.replace("Z", "+00:00")
+                )
+                last_update_str_formatted = last_update.strftime("%Y-%m-%d %H:%M UTC")
+                ago = now - last_update
+                if ago.days > 0:
+                    ago_str = f"{ago.days} days ago"
+                elif ago.seconds > 3600:
+                    hours_ago = ago.seconds // 3600
+                    ago_str = f"{hours_ago} hours ago"
+                elif ago.seconds > 60:
+                    minutes_ago = ago.seconds // 60
+                    ago_str = f"{minutes_ago} minutes ago"
+                else:
+                    ago_str = "Just now"
+            except Exception:
+                last_update_str_formatted = last_update_str
+                ago_str = "Unknown"
+        else:
+            last_update_str_formatted = "Never"
+            ago_str = "No updates yet"
+
+        embed = discord.Embed(
+            title="⏰ Event Update Schedule",
+            description="Information about automatic event updates and message scheduling",
+            color=discord.Color.blue(),
+            timestamp=now,
+        )
+
+        # Next update information
+        embed.add_field(
+            name="🕐 Next Automatic Update",
+            value=f"**Time:** {next_update_str}\n**In:** {time_until_str}",
+            inline=False,
+        )
+
+        # Current configuration
+        embed.add_field(
+            name="⚙️ Update Configuration",
+            value=f"**Interval:** Every {update_interval_hours} hour(s)\n**Status:** {'✅ Enabled' if updates_enabled else '❌ Disabled'}\n**Last Update:** {last_update_str_formatted} ({ago_str})",
+            inline=False,
+        )
+
+        # How messages are sent
+        embed.add_field(
+            name="📨 Message Sending",
+            value="• **Automatic:** New events are sent when updates run\n"
+            "• **Detection:** Only NEW events trigger Discord messages\n"
+            "• **Frequency:** Based on the update interval above\n"
+            "• **Rate Limit:** Updates are spread out to avoid spam",
+            inline=False,
+        )
+
+        # Manual update options
+        embed.add_field(
+            name="🔧 Manual Control",
+            value="• `[p]luma update` - Force check for new events now\n"
+            "• `[p]luma config interval <hours>` - Change update frequency\n"
+            "• `[p]luma config enable/disable` - Toggle automatic updates",
+            inline=False,
+        )
+
+        # Additional helpful info
+        if not updates_enabled:
+            embed.add_field(
+                name="⚠️ Updates Disabled",
+                value="Automatic updates are currently disabled for this server. "
+                "Use `[p]luma config enable` to re-enable them.",
+                inline=False,
+            )
+
+        if (
+            time_until_next and time_until_next.total_seconds() <= 3600
+        ):  # Less than 1 hour
+            embed.add_field(
+                name="🚀 Update Soon",
+                value="The next update will happen within the hour. "
+                "Use `[p]luma update` if you need events checked immediately.",
+                inline=False,
+            )
+
+        await ctx.send(embed=embed)
 
     @luma_group.command(name="events")
     @commands.guild_only()
