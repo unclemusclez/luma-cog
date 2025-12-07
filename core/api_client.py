@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlencode
 
-from ..models.calendar_get import Event, Model
+from ..models.calendar_get import Event, Model, Calendar, FeaturedItem, Host
 
 log = logging.getLogger("red.luma.api")
 
@@ -243,6 +243,9 @@ class LumaAPIClient:
             List of Event objects
         """
         try:
+            calendar_data = None
+            calendar_api_id = calendar_identifier
+
             if is_slug:
                 # First get calendar info using slug, then use the API ID
                 calendar_info = await self.get_calendar_info(calendar_identifier)
@@ -256,6 +259,14 @@ class LumaAPIClient:
                     raise LumaAPIError(
                         f"Could not get API ID for calendar slug '{calendar_identifier}'"
                     )
+
+                # Convert calendar info to Calendar object for access to slug
+                try:
+                    from ..models.calendar_get import Calendar
+
+                    calendar_data = Calendar(**calendar_info)
+                except Exception as e:
+                    log.warning(f"Failed to create Calendar object: {e}")
 
                 log.info(
                     f"Resolved calendar slug '{calendar_identifier}' to API ID '{calendar_api_id}'"
@@ -277,16 +288,28 @@ class LumaAPIClient:
                 try:
                     model = Model(**response_data)
 
-                    # Extract events from featured_items with their hosts
+                    # Store the calendar data from the API response if we don't have it
+                    if calendar_data is None:
+                        try:
+                            calendar_data = Calendar(**response_data["calendar"])
+                        except Exception as e:
+                            log.warning(
+                                f"Failed to create Calendar object from response: {e}"
+                            )
+
+                    # Extract events from featured_items with their hosts and calendar info
                     for featured_item in model.featured_items:
                         if hasattr(featured_item, "event") and featured_item.event:
-                            # Create a wrapper that includes hosts information
+                            # Create a wrapper that includes hosts and calendar information
                             event_with_hosts = type(
                                 "EventWithHosts",
                                 (),
                                 {
                                     "event": featured_item.event,
                                     "hosts": getattr(featured_item, "hosts", []),
+                                    "calendar": getattr(
+                                        featured_item, "calendar", calendar_data
+                                    ),
                                     "__dict__": featured_item.event.__dict__,
                                     "__getattr__": lambda self, name: getattr(
                                         self.event, name
@@ -304,6 +327,7 @@ class LumaAPIClient:
                 # Look for events in various possible locations
                 events_data = []
                 hosts_data = {}
+                calendar_info_data = response_data.get("calendar")
 
                 # Try featured_items first
                 if "featured_items" in response_data:
@@ -334,6 +358,7 @@ class LumaAPIClient:
                                     {
                                         "event": event,
                                         "hosts": hosts_data[event_id],
+                                        "calendar": calendar_data,
                                         "__dict__": event.__dict__,
                                         "__getattr__": lambda self, name: getattr(
                                             self.event, name

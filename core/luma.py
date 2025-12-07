@@ -10,7 +10,7 @@ from redbot.core.utils import menus
 
 import pytz
 
-from ..models.calendar_get import Event, FeaturedItem, Host
+from ..models.calendar_get import Event, FeaturedItem, Host, Calendar
 from ..models.data_models import Subscription, ChannelGroup
 from .api_client import (
     LumaAPIClient,
@@ -509,11 +509,28 @@ class Luma(commands.Cog):
 
         description = ""
 
-        if subscription:
-            # Build URL first, then format for Discord using angle brackets
+        # Use calendar slug from API data instead of local subscription database
+        if (
+            hasattr(event, "calendar")
+            and event.calendar
+            and hasattr(event.calendar, "slug")
+        ):
+            # Use the actual Calendar.slug from the API response
+            calendar_slug = event.calendar.slug
+            calendar_name = getattr(
+                event.calendar,
+                "name",
+                subscription.name if subscription else "Calendar",
+            )
             subscription_url = (
-                f"https://lu.ma/{subscription.api_id}"
-                if subscription.api_id
+                f"https://lu.ma/{calendar_slug}" if calendar_slug else "https://lu.ma"
+            )
+            description += f"*from* [{calendar_name}](<{subscription_url}>)\n\n"
+        elif subscription:
+            # Fallback to local subscription data if API data not available
+            subscription_url = (
+                f"https://lu.ma/{subscription.slug}"
+                if subscription.slug
                 else "https://lu.ma"
             )
             description += f"*from* [{subscription.name}](<{subscription_url}>)\n\n"
@@ -1240,8 +1257,30 @@ class Luma(commands.Cog):
 
                     # Create event title with clickable subscription link
                     event_title = f"**{event.name}**"
-                    if hasattr(event, "subscription_name"):
-                        # Find the subscription to get its slug for the link
+
+                    # Use calendar slug from API data instead of local subscription database
+                    if (
+                        hasattr(event, "calendar")
+                        and event.calendar
+                        and hasattr(event.calendar, "slug")
+                    ):
+                        # Use the actual Calendar.slug from the API response
+                        calendar_slug = event.calendar.slug
+                        calendar_name = getattr(
+                            event.calendar,
+                            "name",
+                            getattr(event, "subscription_name", "Calendar"),
+                        )
+                        subscription_url = (
+                            f"https://lu.ma/{calendar_slug}"
+                            if calendar_slug
+                            else "https://lu.ma"
+                        )
+                        event_title += (
+                            f"\n*from* [{calendar_name}](<{subscription_url}>)"
+                        )
+                    elif hasattr(event, "subscription_name"):
+                        # Find the subscription to get its slug for the link (fallback)
                         subscription_obj = None
                         for sub_id, sub_data in subscriptions.items():
                             sub = Subscription.from_dict(sub_data)
@@ -1259,8 +1298,8 @@ class Luma(commands.Cog):
                         if subscription_obj:
                             # Build URL first, then format for Discord using angle brackets
                             subscription_url = (
-                                f"https://lu.ma/{subscription_obj.api_id}"
-                                if subscription_obj.api_id
+                                f"https://lu.ma/{subscription_obj.slug}"
+                                if subscription_obj.slug
                                 else "https://lu.ma"
                             )
                             event_title += f"\n*from* [{event.subscription_name}](<{subscription_url}>)"
