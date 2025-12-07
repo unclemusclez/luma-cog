@@ -1746,43 +1746,45 @@ class Luma(commands.Cog):
             timestamp=datetime.now(timezone.utc),
         )
 
-        all_events = []
-        seen_api_ids = (
-            set()
-        )  # Track seen api_ids to prevent cross-subscription duplicates
-
         try:
+            # Step 1: Fetch from API and populate database for consistency
+            all_events_data = []
+            seen_api_ids = (
+                set()
+            )  # Track seen api_ids to prevent cross-subscription duplicates
+
             async with LumaAPIClient() as client:
                 for sub_id, sub_data in subscriptions.items():
                     subscription = Subscription.from_dict(sub_data)
                     try:
-                        events = await client.get_calendar_events(
+                        # Fetch events from API
+                        api_events = await client.get_calendar_events(
                             calendar_identifier=subscription.api_id,
                             limit=20,  # Fetch more events for manual display
                         )
 
-                        # Create events with subscription info for display purposes
-                        for event in events:
-                            # Deduplicate events based on api_id to prevent same event from multiple calendars
-                            if event.api_id not in seen_api_ids:
-                                # Create a simple event wrapper that includes subscription info
-                                event_with_subscription = type(
-                                    "EventWithSubscription",
-                                    (),
-                                    {
-                                        "api_id": event.api_id,
-                                        "name": event.name,
-                                        "start_at": event.start_at,
-                                        "end_at": event.end_at,
-                                        "timezone": event.timezone,
-                                        # "event_type": event.event_type,
-                                        "url": event.url,
-                                        "subscription_name": subscription.name,
-                                        "calendar_api_id": subscription.api_id,  # Add for consistency
-                                    },
-                                )()
-                                all_events.append(event_with_subscription)
-                                seen_api_ids.add(event.api_id)
+                        # Convert to dict format for database operations
+                        event_dicts = []
+                        for event in api_events:
+                            event_dict = {
+                                "api_id": event.api_id,
+                                "calendar_api_id": subscription.api_id,
+                                "name": event.name,
+                                "start_at": event.start_at,
+                                "end_at": event.end_at,
+                                "timezone": event.timezone,
+                                # "event_type": event.event_type,
+                                "url": event.url,
+                                "last_modified": datetime.now(timezone.utc).isoformat(),
+                            }
+                            event_dicts.append(event_dict)
+
+                        # Populate database with fetched events (for consistency)
+                        if event_dicts:
+                            await self.event_db.upsert_events(
+                                event_dicts, subscription.api_id
+                            )
+                            all_events_data.extend(event_dicts)
 
                     except Exception as e:
                         log.error(
@@ -1790,20 +1792,36 @@ class Luma(commands.Cog):
                         )
                         continue
 
-            if not all_events:
+            # Step 2: Get events from database for display (ensures consistency)
+            # This ensures database stats match displayed events
+            all_db_events = []
+            for sub_id, sub_data in subscriptions.items():
+                subscription = Subscription.from_dict(sub_data)
+                db_events = await self.event_db.get_tracked_events(subscription.api_id)
+
+                # Add subscription info to database events for display
+                for event_data in db_events:
+                    # Deduplicate events based on api_id
+                    if event_data["event_api_id"] not in seen_api_ids:
+                        event_data["subscription_name"] = subscription.name
+                        event_data["calendar_api_id"] = subscription.api_id
+                        all_db_events.append(event_data)
+                        seen_api_ids.add(event_data["event_api_id"])
+
+            if not all_db_events:
                 embed.description = "No upcoming events found."
                 await ctx.send(embed=embed)
                 return
 
-            # Sort events by start time
-            all_events.sort(key=lambda x: x.start_at)
+            # Step 3: Sort events by start time
+            all_db_events.sort(key=lambda x: x["start_at"])
 
             # Limit to recent events (next 30 days)
             cutoff_date = datetime.now(timezone.utc) + timedelta(days=30)
             recent_events = [
                 event
-                for event in all_events
-                if datetime.fromisoformat(event.start_at.replace("Z", "+00:00"))
+                for event in all_db_events
+                if datetime.fromisoformat(event["start_at"].replace("Z", "+00:00"))
                 <= cutoff_date
             ]
 
@@ -1812,15 +1830,15 @@ class Luma(commands.Cog):
                 await ctx.send(embed=embed)
                 return
 
-            # Display events in embed
+            # Step 4: Display events from database (now consistent with database state)
             for event in recent_events[:10]:  # Limit to 10 events per message
                 try:
                     start_time = datetime.fromisoformat(
-                        event.start_at.replace("Z", "+00:00")
+                        event["start_at"].replace("Z", "+00:00")
                     )
                     end_time = (
-                        datetime.fromisoformat(event.end_at.replace("Z", "+00:00"))
-                        if event.end_at
+                        datetime.fromisoformat(event["end_at"].replace("Z", "+00:00"))
+                        if event["end_at"]
                         else None
                     )
 
@@ -1829,103 +1847,44 @@ class Luma(commands.Cog):
 
                     # Use the new local time formatting
                     local_time_str = format_local_time(
-                        event.start_at,
-                        event.timezone or "UTC",
-                        include_end_time=bool(event.end_at),
-                        end_time_str=event.end_at,
+                        event["start_at"],
+                        event["timezone"] or "UTC",
+                        include_end_time=bool(event["end_at"]),
+                        end_time_str=event["end_at"],
                     )
 
                     # Create event title with clickable subscription link
-                    event_title = f"**{event.name}**"
+                    event_title = f"**{event['name']}**"
 
-                    # Use calendar slug from API data instead of local subscription database
-                    if (
-                        hasattr(event, "calendar")
-                        and event.calendar
-                        and hasattr(event.calendar, "slug")
-                        and event.calendar.slug
-                    ):
-                        # Use the actual Calendar.slug from the API response
-                        calendar_slug = event.calendar.slug.strip()
-                        calendar_name = getattr(
-                            event.calendar,
-                            "name",
-                            getattr(event, "subscription_name", "Calendar"),
-                        )
-                        # Ensure calendar_name is not empty
-                        if not calendar_name or not calendar_name.strip():
-                            calendar_name = "Calendar"
-                        subscription_url = f"https://lu.ma/{calendar_slug}"
-                        event_title += (
-                            f"\n*from* [{calendar_name}](<{subscription_url}>)"
-                        )
-                    elif hasattr(event, "subscription_name"):
-                        # Find the subscription to get its slug for the link (fallback)
-                        subscription_obj = None
-                        for sub_id, sub_data in subscriptions.items():
-                            sub = Subscription.from_dict(sub_data)
-                            # Use calendar_api_id if available, otherwise fallback to name matching
-                            if (
-                                hasattr(event, "calendar_api_id")
-                                and sub.api_id == event.calendar_api_id
-                            ):
-                                subscription_obj = sub
-                                break
-                            elif sub.name == event.subscription_name:
-                                subscription_obj = sub
-                                break
+                    # Find the subscription to get its slug for the link
+                    subscription_obj = None
+                    for sub_id, sub_data in subscriptions.items():
+                        sub = Subscription.from_dict(sub_data)
+                        if sub.api_id == event["calendar_api_id"]:
+                            subscription_obj = sub
+                            break
 
-                        if subscription_obj and subscription_obj.slug:
-                            # Build URL first, then format for Discord using angle brackets
-                            subscription_url = f"https://lu.ma/{subscription_obj.slug}"
-                            event_title += f"\n*from* [{event.subscription_name}](<{subscription_url}>)"
-                        elif subscription_obj:
-                            # Subscription exists but no slug
-                            event_title += f"\n*from {event.subscription_name}*"
-                        else:
-                            # Fallback if subscription not found
-                            event_title += f"\n*from {event.subscription_name}*"
+                    if subscription_obj and subscription_obj.slug:
+                        # Build URL first, then format for Discord using angle brackets
+                        subscription_url = f"https://lu.ma/{subscription_obj.slug}"
+                        event_title += f"\n*from* [{event['subscription_name']}](<{subscription_url}>)"
+                    elif subscription_obj:
+                        # Subscription exists but no slug
+                        event_title += f"\n*from {event['subscription_name']}*"
+                    else:
+                        # Fallback if subscription not found
+                        event_title += f"\n*from {event['subscription_name']}*"
 
                     # Event details
                     details = f"📅 {date_str}\n🕐 Local Time: {local_time_str}"
 
-                    # if event.event_type:
-                    #     details += f"\n📋 Type: {event.event_type.title()}"
-
-                    # Add location if available
-                    if hasattr(event, "geo_address_info") and event.geo_address_info:
-                        location = event.geo_address_info
-                        if hasattr(location, "city_state") and location.city_state:
-                            details += f"\n📍 {location.city_state}"
+                    # if event["event_type"]:
+                    #     details += f"\n📋 Type: {event['event_type'].title()}"
 
                     # Build event URL first, then format with angle brackets for reliability
-                    if event.url:
-                        event_url = f"https://lu.ma/{event.url}"
+                    if event["url"]:
+                        event_url = f"https://lu.ma/{event['url']}"
                         details += f"\n🔗 [View Event](<{event_url}>)"
-
-                    # Add hosts information if available
-                    if hasattr(event, "hosts") and event.hosts:
-                        host_names = [
-                            host.name for host in event.hosts[:3]
-                        ]  # Limit to 3 hosts
-                        if len(host_names) == 1:
-                            details += f"\n👤 Host: {host_names[0]}"
-                        elif len(host_names) == 2:
-                            details += f"\n👥 Hosts: {host_names[0]} & {host_names[1]}"
-                        else:
-                            details += f"\n👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}"
-
-                    # Add tags information if available
-                    if hasattr(event, "tags") and event.tags:
-                        tag_names = [
-                            tag.name for tag in event.tags[:3]
-                        ]  # Limit to 3 tags
-                        if len(tag_names) == 1:
-                            details += f"\n🏷️ Tag: {tag_names[0]}"
-                        elif len(tag_names) == 2:
-                            details += f"\n🏷️ Tags: {tag_names[0]} & {tag_names[1]}"
-                        else:
-                            details += f"\n🏷️ Tags: {', '.join(tag_names[:-1])}, & {tag_names[-1]}"
 
                     embed.add_field(
                         name=event_title,
@@ -1934,7 +1893,7 @@ class Luma(commands.Cog):
                     )
 
                 except Exception as e:
-                    log.warning(f"Error formatting event {event.name}: {e}")
+                    log.warning(f"Error formatting event {event['name']}: {e}")
                     continue
 
             if len(recent_events) > 10:
