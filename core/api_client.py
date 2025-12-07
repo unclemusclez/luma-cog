@@ -305,7 +305,7 @@ class LumaAPIClient:
                             if not event_calendar and calendar_data:
                                 event_calendar = calendar_data
 
-                            # Create a wrapper that includes hosts and calendar information
+                            # Create a wrapper that includes hosts, calendar, and tags information
                             event_with_hosts = type(
                                 "EventWithHosts",
                                 (),
@@ -313,6 +313,7 @@ class LumaAPIClient:
                                     "event": featured_item.event,
                                     "hosts": getattr(featured_item, "hosts", []),
                                     "calendar": event_calendar,
+                                    "tags": getattr(featured_item, "tags", []),
                                     "__dict__": featured_item.event.__dict__,
                                     "__getattr__": lambda self, name: getattr(
                                         self.event, name
@@ -366,6 +367,16 @@ class LumaAPIClient:
                                         )
                                         event_calendar = None
 
+                                # Get tags for this event from the original response
+                                event_tags = []
+                                for item in response_data.get("featured_items", []):
+                                    if (
+                                        item.get("event", {}).get("api_id") == event_id
+                                        and "tags" in item
+                                    ):
+                                        event_tags = item["tags"]
+                                        break
+
                                 event_with_hosts = type(
                                     "EventWithHosts",
                                     (),
@@ -373,6 +384,7 @@ class LumaAPIClient:
                                         "event": event,
                                         "hosts": hosts_data[event_id],
                                         "calendar": event_calendar,
+                                        "tags": event_tags,
                                         "__dict__": event.__dict__,
                                         "__getattr__": lambda self, name: getattr(
                                             self.event, name
@@ -383,6 +395,17 @@ class LumaAPIClient:
                             else:
                                 # Even without hosts, wrap with calendar data if available
                                 if calendar_data:
+                                    # Get tags for this event from the original response
+                                    event_tags = []
+                                    for item in response_data.get("featured_items", []):
+                                        if (
+                                            item.get("event", {}).get("api_id")
+                                            == event_data.get("api_id")
+                                            and "tags" in item
+                                        ):
+                                            event_tags = item["tags"]
+                                            break
+
                                     event_with_calendar = type(
                                         "EventWithCalendar",
                                         (),
@@ -390,6 +413,7 @@ class LumaAPIClient:
                                             "event": event,
                                             "hosts": [],
                                             "calendar": calendar_data,
+                                            "tags": event_tags,
                                             "__dict__": event.__dict__,
                                             "__getattr__": lambda self, name: getattr(
                                                 self.event, name

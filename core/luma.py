@@ -509,7 +509,7 @@ class Luma(commands.Cog):
 
         description = ""
 
-        # Use calendar slug from API data instead of local subscription database
+        # Use calendar slug from API data (correct data model usage)
         if (
             hasattr(event, "calendar")
             and event.calendar
@@ -552,6 +552,18 @@ class Luma(commands.Cog):
             else:
                 description += (
                     f"👥 **Hosts:** {', '.join(host_names[:-1])}, & {host_names[-1]}\n"
+                )
+
+        # Add tags information if available
+        if hasattr(event, "tags") and event.tags:
+            tag_names = [tag.name for tag in event.tags[:3]]  # Limit to 3 tags
+            if len(tag_names) == 1:
+                description += f"🏷️ **Tag:** {tag_names[0]}\n"
+            elif len(tag_names) == 2:
+                description += f"🏷️ **Tags:** {tag_names[0]} & {tag_names[1]}\n"
+            else:
+                description += (
+                    f"🏷️ **Tags:** {', '.join(tag_names[:-1])}, & {tag_names[-1]}\n"
                 )
 
         # Build event URL and add link
@@ -1335,6 +1347,18 @@ class Luma(commands.Cog):
                             details += f"\n👥 Hosts: {host_names[0]} & {host_names[1]}"
                         else:
                             details += f"\n👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}"
+
+                    # Add tags information if available
+                    if hasattr(event, "tags") and event.tags:
+                        tag_names = [
+                            tag.name for tag in event.tags[:3]
+                        ]  # Limit to 3 tags
+                        if len(tag_names) == 1:
+                            details += f"\n🏷️ Tag: {tag_names[0]}"
+                        elif len(tag_names) == 2:
+                            details += f"\n🏷️ Tags: {tag_names[0]} & {tag_names[1]}"
+                        else:
+                            details += f"\n🏷️ Tags: {', '.join(tag_names[:-1])}, & {tag_names[-1]}"
 
                     embed.add_field(
                         name=event_title,
