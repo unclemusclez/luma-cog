@@ -394,9 +394,9 @@ class Luma(commands.Cog):
                 if subscription:
                     # Use italics AND links format: [*text*](url)
                     subscription_url = (
-                        f"https://luma.com/{subscription.slug}"
-                        if subscription.slug
-                        else "https://luma.com"
+                        f"<https://luma.com/{subscription.api_id}>"
+                        if subscription.api_id
+                        else "<https://luma.com>"
                     )
                     description += f"from [*{subscription.name}*]({subscription_url})\n"
                 else:
@@ -1114,9 +1114,9 @@ class Luma(commands.Cog):
                         if subscription_obj:
                             # Use italics AND links format: [*text*](url)
                             subscription_url = (
-                                f"https://luma.com/{subscription_obj.slug}"
-                                if subscription_obj.slug
-                                else "https://luma.com"
+                                f"<https://luma.com/{subscription_obj.api_id}>"
+                                if subscription_obj.api_id
+                                else "<https://luma.com>"
                             )
                             event_title += f"\nfrom [*{event.subscription_name}*]({subscription_url})"
                         else:
