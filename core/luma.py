@@ -8,7 +8,9 @@ from redbot.core import Config, commands, checks
 from redbot.core.bot import Red
 from redbot.core.utils import menus
 
-from ..models.calendar_get import Event
+import pytz
+
+from ..models.calendar_get import Event, FeaturedItem, Host
 from ..models.data_models import Subscription, ChannelGroup
 from .api_client import (
     LumaAPIClient,
@@ -20,6 +22,87 @@ from .database import EventDatabase
 
 
 log = logging.getLogger("red.luma")
+
+
+def get_timezone_abbr(timezone_str: str) -> str:
+    """Get timezone abbreviation from timezone string using pytz."""
+    if not timezone_str:
+        return "UTC"
+
+    try:
+        tz = pytz.timezone(timezone_str)
+        # Create a sample datetime to get the timezone abbreviation
+        sample_time = datetime.now(tz)
+        abbr = sample_time.strftime("%Z")
+        return abbr if abbr else "UTC"
+    except:
+        return "UTC"
+
+
+def convert_utc_to_timezone(utc_time_str: str, timezone_str: str) -> datetime:
+    """Convert UTC time string to timezone-aware datetime."""
+    if not timezone_str:
+        # If no timezone provided, assume UTC
+        return datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+
+    try:
+        # Parse UTC time
+        utc_time = datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+
+        # Create timezone object
+        try:
+            tz = pytz.timezone(timezone_str)
+        except:
+            # If timezone is invalid, fall back to UTC
+            log.warning(f"Invalid timezone '{timezone_str}', falling back to UTC")
+            return utc_time
+
+        # Convert UTC time to the target timezone
+        localized_time = utc_time.replace(tzinfo=pytz.UTC)
+        converted_time = localized_time.astimezone(tz)
+
+        return converted_time
+
+    except Exception as e:
+        log.warning(
+            f"Error converting timezone for '{utc_time_str}' to '{timezone_str}': {e}"
+        )
+        # Fallback to original UTC time
+        return datetime.fromisoformat(utc_time_str.replace("Z", "+00:00"))
+
+
+def format_local_time(
+    utc_time_str: str,
+    timezone_str: str,
+    include_end_time: bool = False,
+    end_time_str: Optional[str] = None,
+) -> str:
+    """Format UTC time as local time with timezone abbreviation."""
+    try:
+        # Convert start time
+        start_time = convert_utc_to_timezone(utc_time_str, timezone_str)
+
+        # Format start time
+        start_time_str = start_time.strftime("%I:%M %p")
+
+        if include_end_time and end_time_str:
+            # Convert end time
+            end_time = convert_utc_to_timezone(end_time_str, timezone_str)
+            end_time_str_formatted = end_time.strftime("%I:%M %p")
+            time_display = f"{start_time_str} - {end_time_str_formatted}"
+        else:
+            time_display = start_time_str
+
+        # Get timezone abbreviation
+        tz_abbr = get_timezone_abbr(timezone_str)
+
+        return f"{time_display} {tz_abbr}"
+
+    except Exception as e:
+        log.warning(f"Error formatting local time: {e}")
+        # Fallback to original UTC time
+        return f"{utc_time_str} UTC"
+
 
 # End-User Data Statement for Redbot compliance
 __data_statement__ = """
@@ -429,17 +512,17 @@ class Luma(commands.Cog):
         if subscription:
             # Build URL first, then format for Discord using angle brackets
             subscription_url = (
-                f"https://lu.ma/{subscription.slug}"
-                if subscription.slug
+                f"https://lu.ma/{subscription.api_id}"
+                if subscription.api_id
                 else "https://lu.ma"
             )
             description += f"*from* [{subscription.name}](<{subscription_url}>)\n\n"
 
         description += f"📅 **Date:** {date_str}\n"
-        description += f"🕐 **Time:** {time_str}\n"
 
-        if event.timezone:
-            description += f"🌍 **Timezone:** {event.timezone}\n"
+        # Format local time with timezone conversion and abbreviation
+        local_time_str = format_local_time(event.start_at, event.timezone or "UTC")
+        description += f"🕐 **Local Time:** {local_time_str}\n"
 
         # Add hosts information if available
         if hasattr(event, "hosts") and event.hosts:
@@ -1144,15 +1227,16 @@ class Luma(commands.Cog):
                         else None
                     )
 
-                    # Format date/time nicely
+                    # Format date nicely
                     date_str = start_time.strftime("%A, %B %d, %Y")
-                    time_str = start_time.strftime("%I:%M %p")
 
-                    if end_time:
-                        end_time_str = end_time.strftime("%I:%M %p")
-                        time_display = f"{time_str} - {end_time_str}"
-                    else:
-                        time_display = time_str
+                    # Use the new local time formatting
+                    local_time_str = format_local_time(
+                        event.start_at,
+                        event.timezone or "UTC",
+                        include_end_time=bool(event.end_at),
+                        end_time_str=event.end_at,
+                    )
 
                     # Create event title with clickable subscription link
                     event_title = f"**{event.name}**"
@@ -1175,8 +1259,8 @@ class Luma(commands.Cog):
                         if subscription_obj:
                             # Build URL first, then format for Discord using angle brackets
                             subscription_url = (
-                                f"https://lu.ma/{subscription_obj.slug}"
-                                if subscription_obj.slug
+                                f"https://lu.ma/{subscription_obj.api_id}"
+                                if subscription_obj.api_id
                                 else "https://lu.ma"
                             )
                             event_title += f"\n*from* [{event.subscription_name}](<{subscription_url}>)"
@@ -1185,10 +1269,7 @@ class Luma(commands.Cog):
                             event_title += f"\n*from {event.subscription_name}*"
 
                     # Event details
-                    details = f"📅 {date_str}\n🕐 {time_display}"
-
-                    if event.timezone:
-                        details += f"\n🌍 Timezone: {event.timezone}"
+                    details = f"📅 {date_str}\n🕐 Local Time: {local_time_str}"
 
                     # if event.event_type:
                     #     details += f"\n📋 Type: {event.event_type.title()}"
@@ -1203,18 +1284,6 @@ class Luma(commands.Cog):
                     if event.url:
                         event_url = f"https://lu.ma/{event.url}"
                         details += f"\n🔗 [View Event](<{event_url}>)"
-
-                    # Add hosts information if available
-                    if hasattr(event, "hosts") and event.hosts:
-                        host_names = [
-                            host.name for host in event.hosts[:3]
-                        ]  # Limit to 3 hosts
-                        if len(host_names) == 1:
-                            details += f"\n👤 Host: {host_names[0]}"
-                        elif len(host_names) == 2:
-                            details += f"\n👥 Hosts: {host_names[0]} & {host_names[1]}"
-                        else:
-                            details += f"\n👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}"
 
                     # Add hosts information if available
                     if hasattr(event, "hosts") and event.hosts:
