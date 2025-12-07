@@ -282,7 +282,7 @@ class Luma(commands.Cog):
                         "start_at": event.start_at,
                         "end_at": event.end_at,
                         "timezone": event.timezone,
-                        "event_type": event.event_type,
+                        # "event_type": event.event_type,
                         "url": event.url,
                         "last_modified": datetime.now(timezone.utc).isoformat(),
                     }
@@ -355,7 +355,10 @@ class Luma(commands.Cog):
         guild: discord.Guild,
         group_name: str,
     ):
-        """Send formatted events to a Discord channel."""
+        """Send individual event messages to a Discord channel.
+
+        Each new event is sent as its own message/embed for better visibility.
+        """
         try:
             channel = guild.get_channel(channel_id)
             if not channel:
@@ -368,67 +371,96 @@ class Luma(commands.Cog):
             # Get subscriptions for building clickable links
             subscriptions = await self.config.guild(guild).subscriptions()
 
-            embed = discord.Embed(
-                title=f"📅 Upcoming Events - {group_name}",
-                color=discord.Color.blue(),
-                timestamp=datetime.now(timezone.utc),
-            )
-
-            description = ""
-            for event in events[:10]:  # Limit to 10 events per message
-                start_time = datetime.fromisoformat(
-                    event.start_at.replace("Z", "+00:00")
-                )
-                time_str = start_time.strftime("%Y-%m-%d %H:%M UTC")
-
-                description += f"**{event.name}**\n"
-
-                # Add subscription name as clickable link if available
-                subscription = None
-                for sub_id, sub_data in subscriptions.items():
-                    sub = Subscription.from_dict(sub_data)
-                    if sub.api_id == event.calendar_api_id:
-                        subscription = sub
-                        break
-
-                if subscription:
-                    # Use italics AND links format: [*text*](url)
-                    subscription_url = (
-                        f"<https://luma.com/{subscription.api_id}>"
-                        if subscription.api_id
-                        else "<https://luma.com>"
-                    )
-                    description += f"from [*{subscription.name}*]({subscription_url})\n"
-                else:
-                    # Fallback to API ID if subscription not found
-                    description += f"from {event.calendar_api_id}\n"
-
-                description += f"🕐 {time_str}\n"
-
-                # Add hosts information if available
-                if hasattr(event, "hosts") and event.hosts:
-                    host_names = [
-                        host.name for host in event.hosts[:3]
-                    ]  # Limit to 3 hosts
-                    if len(host_names) == 1:
-                        description += f"👤 Host: {host_names[0]}\n"
-                    elif len(host_names) == 2:
-                        description += f"👥 Hosts: {host_names[0]} & {host_names[1]}\n"
-                    else:
-                        description += f"👥 Hosts: {', '.join(host_names[:-1])}, & {host_names[-1]}\n"
-
-                description += f" [View Event](https://luma.com/{event.url})\n\n"
-
-            embed.description = description
-
             # Check if we have permission to send messages
-            if channel.permissions_for(guild.me).send_messages:
-                await channel.send(embed=embed)
-            else:
+            if not channel.permissions_for(guild.me).send_messages:
                 log.warning(f"No permission to send messages in channel {channel_id}")
+                return
+
+            # Send each event as an individual message
+            for event in events[:10]:  # Limit to 10 events per update
+                try:
+                    await self._send_single_event_embed(
+                        channel, event, subscriptions, group_name
+                    )
+                    # Small delay between messages to avoid rate limiting
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    log.error(f"Error sending event {event.name}: {e}")
+                    continue
+
+            log.info(
+                f"Sent {min(len(events), 10)} individual event messages to channel {channel_id}"
+            )
 
         except Exception as e:
             log.error(f"Error sending events to channel {channel_id}: {e}")
+
+    async def _send_single_event_embed(
+        self,
+        channel,
+        event: Event,
+        subscriptions: Dict,
+        group_name: str,
+    ):
+        """Send a single event as its own Discord embed message."""
+        start_time = datetime.fromisoformat(event.start_at.replace("Z", "+00:00"))
+
+        # Format date/time nicely
+        date_str = start_time.strftime("%A, %B %d, %Y")
+        time_str = start_time.strftime("%I:%M %p UTC")
+
+        # Build the embed for this single event
+        embed = discord.Embed(
+            title=f"🆕 New Event: {event.name}",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        # Find subscription for this event
+        subscription = None
+        for sub_id, sub_data in subscriptions.items():
+            sub = Subscription.from_dict(sub_data)
+            if sub.api_id == event.calendar_api_id:
+                subscription = sub
+                break
+
+        description = ""
+
+        if subscription:
+            # Build URL first, then format for Discord using angle brackets
+            subscription_url = (
+                f"https://lu.ma/{subscription.slug}"
+                if subscription.slug
+                else "https://lu.ma"
+            )
+            description += f"*from* [{subscription.name}](<{subscription_url}>)\n\n"
+
+        description += f"📅 **Date:** {date_str}\n"
+        description += f"🕐 **Time:** {time_str}\n"
+
+        if event.timezone:
+            description += f"🌍 **Timezone:** {event.timezone}\n"
+
+        # Add hosts information if available
+        if hasattr(event, "hosts") and event.hosts:
+            host_names = [host.name for host in event.hosts[:3]]
+            if len(host_names) == 1:
+                description += f"👤 **Host:** {host_names[0]}\n"
+            elif len(host_names) == 2:
+                description += f"👥 **Hosts:** {host_names[0]} & {host_names[1]}\n"
+            else:
+                description += (
+                    f"👥 **Hosts:** {', '.join(host_names[:-1])}, & {host_names[-1]}\n"
+                )
+
+        # Build event URL and add link
+        event_url = f"https://lu.ma/{event.url}" if event.url else "https://lu.ma"
+        description += f"\n🔗 [View Event](<{event_url}>)"
+
+        embed.description = description
+        embed.set_footer(text=f"From: {group_name}")
+
+        await channel.send(embed=embed)
 
     @commands.group(name="luma", invoke_without_command=True)
     @commands.guild_only()
@@ -804,19 +836,48 @@ class Luma(commands.Cog):
     @luma_group.command(name="update")
     @checks.admin_or_permissions(manage_guild=True)
     async def manual_update(self, ctx: commands.Context):
-        """Manually trigger an event update for this guild."""
+        """Manually trigger an event update for this guild.
+
+        This sends individual new event messages to configured channels,
+        mimicking the automatic update behavior but triggered on-demand.
+        """
         embed = discord.Embed(
             title="Manual Update",
-            description="Starting manual update of events...",
+            description="🔄 Checking for new events...",
             color=discord.Color.blue(),
         )
         message = await ctx.send(embed=embed)
 
         try:
-            await self.update_guild_events(ctx.guild)
+            # Use check_for_changes=True to detect and send only NEW events
+            subscriptions = await self.config.guild(ctx.guild).subscriptions()
+            channel_groups = await self.config.guild(ctx.guild).channel_groups()
 
-            embed.description = "✅ Manual update completed successfully!"
-            embed.color = discord.Color.green()
+            total_new_events = 0
+
+            for group_name, group_data in channel_groups.items():
+                group = ChannelGroup.from_dict(group_data)
+                result = await self.fetch_events_for_group(
+                    group, subscriptions, check_for_changes=True
+                )
+
+                # Send individual messages for new events
+                if result["events"] and result["new_events_count"] > 0:
+                    log.info(
+                        f"Manual update: Sending {result['new_events_count']} new events to group '{group_name}'"
+                    )
+                    await self.send_events_to_channel(
+                        group.channel_id, result["events"], ctx.guild, group_name
+                    )
+                    total_new_events += result["new_events_count"]
+
+            if total_new_events > 0:
+                embed.description = f"✅ Found and sent **{total_new_events}** new event(s) to channels!"
+                embed.color = discord.Color.green()
+            else:
+                embed.description = "✅ Update complete. No new events detected."
+                embed.color = discord.Color.green()
+
             await message.edit(embed=embed)
 
         except Exception as e:
@@ -1035,7 +1096,7 @@ class Luma(commands.Cog):
                                     "start_at": event.start_at,
                                     "end_at": event.end_at,
                                     "timezone": event.timezone,
-                                    "event_type": event.event_type,
+                                    # "event_type": event.event_type,
                                     "url": event.url,
                                     "subscription_name": subscription.name,
                                     "calendar_api_id": subscription.api_id,  # Add for consistency
@@ -1112,13 +1173,13 @@ class Luma(commands.Cog):
                                 break
 
                         if subscription_obj:
-                            # Use italics AND links format: [*text*](url)
+                            # Build URL first, then format for Discord using angle brackets
                             subscription_url = (
-                                f"<https://luma.com/{subscription_obj.api_id}>"
-                                if subscription_obj.api_id
-                                else "<https://luma.com>"
+                                f"https://lu.ma/{subscription_obj.slug}"
+                                if subscription_obj.slug
+                                else "https://lu.ma"
                             )
-                            event_title += f"\n*from [{event.subscription_name}]({subscription_url})*"
+                            event_title += f"\n*from* [{event.subscription_name}](<{subscription_url}>)"
                         else:
                             # Fallback if subscription not found
                             event_title += f"\n*from {event.subscription_name}*"
@@ -1129,8 +1190,8 @@ class Luma(commands.Cog):
                     if event.timezone:
                         details += f"\n🌍 Timezone: {event.timezone}"
 
-                    if event.event_type:
-                        details += f"\n📋 Type: {event.event_type.title()}"
+                    # if event.event_type:
+                    #     details += f"\n📋 Type: {event.event_type.title()}"
 
                     # Add location if available
                     if hasattr(event, "geo_address_info") and event.geo_address_info:
@@ -1138,9 +1199,10 @@ class Luma(commands.Cog):
                         if hasattr(location, "city_state") and location.city_state:
                             details += f"\n📍 {location.city_state}"
 
-                    # Add actual URL instead of just slug
+                    # Build event URL first, then format with angle brackets for reliability
                     if event.url:
-                        details += f"\n🔗 [View Event](<https://luma.com/{event.url}>)"
+                        event_url = f"https://lu.ma/{event.url}"
+                        details += f"\n🔗 [View Event](<{event_url}>)"
 
                     # Add hosts information if available
                     if hasattr(event, "hosts") and event.hosts:
