@@ -373,7 +373,7 @@ class Luma(commands.Cog):
 
                 description += f"**{event.name}**\n"
                 description += f"🕐 {time_str}\n"
-                description += f"🔗 <{event.url}>\n\n"
+                description += f"🔗 [View Event]<https://luma.com/{event.url}>\n\n"
 
             embed.description = description
 
