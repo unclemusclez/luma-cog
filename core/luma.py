@@ -254,6 +254,7 @@ class Luma(commands.Cog):
     ) -> Dict[str, Any]:
         """Fetch events for a specific channel group with change detection."""
         all_events = []
+        seen_api_ids = set()  # Track seen api_ids to prevent duplicates
         total_new_events = 0
         change_stats = {"new_events": 0, "updated_events": 0, "deleted_events": 0}
 
@@ -264,7 +265,12 @@ class Luma(commands.Cog):
                     result = await self.fetch_events_from_subscription(
                         subscription, check_for_changes
                     )
-                    all_events.extend(result["events"])
+                    # Deduplicate events based on api_id to prevent same event from multiple calendars
+                    for event in result["events"]:
+                        if event.api_id not in seen_api_ids:
+                            all_events.append(event)
+                            seen_api_ids.add(event.api_id)
+
                     total_new_events += len(result["new_events"])
 
                     # Aggregate change stats
@@ -1186,6 +1192,9 @@ class Luma(commands.Cog):
         )
 
         all_events = []
+        seen_api_ids = (
+            set()
+        )  # Track seen api_ids to prevent cross-subscription duplicates
 
         try:
             async with LumaAPIClient() as client:
@@ -1199,23 +1208,26 @@ class Luma(commands.Cog):
 
                         # Create events with subscription info for display purposes
                         for event in events:
-                            # Create a simple event wrapper that includes subscription info
-                            event_with_subscription = type(
-                                "EventWithSubscription",
-                                (),
-                                {
-                                    "api_id": event.api_id,
-                                    "name": event.name,
-                                    "start_at": event.start_at,
-                                    "end_at": event.end_at,
-                                    "timezone": event.timezone,
-                                    # "event_type": event.event_type,
-                                    "url": event.url,
-                                    "subscription_name": subscription.name,
-                                    "calendar_api_id": subscription.api_id,  # Add for consistency
-                                },
-                            )()
-                            all_events.append(event_with_subscription)
+                            # Deduplicate events based on api_id to prevent same event from multiple calendars
+                            if event.api_id not in seen_api_ids:
+                                # Create a simple event wrapper that includes subscription info
+                                event_with_subscription = type(
+                                    "EventWithSubscription",
+                                    (),
+                                    {
+                                        "api_id": event.api_id,
+                                        "name": event.name,
+                                        "start_at": event.start_at,
+                                        "end_at": event.end_at,
+                                        "timezone": event.timezone,
+                                        # "event_type": event.event_type,
+                                        "url": event.url,
+                                        "subscription_name": subscription.name,
+                                        "calendar_api_id": subscription.api_id,  # Add for consistency
+                                    },
+                                )()
+                                all_events.append(event_with_subscription)
+                                seen_api_ids.add(event.api_id)
 
                     except Exception as e:
                         log.error(

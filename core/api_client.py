@@ -229,7 +229,7 @@ class LumaAPIClient:
         raise LumaAPIError(f"Request failed after {self.MAX_RETRIES} attempts")
 
     async def get_calendar_events(
-        self, calendar_identifier: str, limit: int = 50, is_slug: bool = False
+        self, calendar_identifier: str, limit: int = 50, is_slug: bool = Fafffffffflse
     ) -> List[Event]:
         """
         Fetch events from a Luma calendar.
