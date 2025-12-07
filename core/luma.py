@@ -207,7 +207,6 @@ class Luma(commands.Cog):
         # For automatic updates, only include events that are actually new
         if check_for_changes:
             # Use the new events detected by the database, not all events
-            # We need to re-fetch to get the actual new events from each subscription
             all_new_events = []
             for sub_id in group.subscription_ids:
                 if sub_id in subscriptions:
@@ -231,14 +230,15 @@ class Luma(commands.Cog):
                 if datetime.fromisoformat(e.start_at.replace("Z", "+00:00"))
                 >= cutoff_date
             ]
+
+            # For automatic updates, return the new events (not all filtered events)
+            events_to_return = new_filtered_events[: group.max_events]
         else:
             # For manual updates, include all recent events
-            new_filtered_events = filtered_events
+            events_to_return = filtered_events[: group.max_events]
 
         return {
-            "events": new_filtered_events[
-                : group.max_events
-            ],  # Limit to max_events per group
+            "events": events_to_return,
             "new_events_count": total_new_events,
             "change_stats": change_stats,
         }
@@ -373,7 +373,7 @@ class Luma(commands.Cog):
 
                 description += f"**{event.name}**\n"
                 description += f"🕐 {time_str}\n"
-                description += f"🔗 {event.url}\n\n"
+                description += f"🔗 <{event.url}>\n\n"
 
             embed.description = description
 
@@ -1070,7 +1070,7 @@ class Luma(commands.Cog):
 
                     # Add actual URL instead of just slug
                     if event.url:
-                        details += f"\n🔗 [View Event]({event.url})"
+                        details += f"\n🔗 <{event.url}>"
 
                     embed.add_field(
                         name=event_title,
